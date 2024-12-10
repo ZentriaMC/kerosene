@@ -1,0 +1,13 @@
+---
+- name: "Do systemd daemon reload"
+  become: true
+  ansible.builtin.systemd:
+    daemon_reload: true
+  listen: "protocol-solana : Do systemd daemon reload"
+
+- name: "Restart Solana service"
+  become: true
+  ansible.builtin.systemd:
+    name: "solana"
+    state: "restarted"
+  listen: "protocol-solana : Restart Solana service"

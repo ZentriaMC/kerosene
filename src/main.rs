@@ -1,18 +1,24 @@
 use std::{
     collections::HashMap,
+    fs::File,
+    io::ErrorKind,
+    path::{Path, PathBuf},
     sync::{Arc, OnceLock},
 };
 
-use minijinja::context;
-use tokio::sync::Mutex;
+use clap::Parser;
+use serde_yaml::Value;
 use tracing::{debug, info, level_filters::LevelFilter, trace};
 use tracing_subscriber::EnvFilter;
 
 pub mod serde;
 pub mod task;
 
-use crate::serde::{task::TaskDescription, TaskId};
-use crate::task::{KeroseneTaskInfo, TaskContext};
+use crate::serde::{
+    play::{Play, PlayRole},
+    task::TaskDescription,
+};
+use crate::task::{KeroseneTaskInfo, TaskContext, TaskId};
 
 pub fn known_tasks() -> &'static HashMap<&'static str, TaskId> {
     static TASKS: OnceLock<HashMap<&'static str, TaskId>> = OnceLock::new();
@@ -51,6 +57,25 @@ pub fn get_task(id: &'static str) -> Option<&'static KeroseneTaskInfo> {
     None
 }
 
+fn load_yaml<T>(path: &Path) -> eyre::Result<Option<T>>
+where
+    T: ::serde::de::DeserializeOwned,
+{
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err.into()),
+    };
+
+    Ok(Some(serde_yaml::from_reader::<_, T>(file)?))
+}
+
+#[derive(Debug, Parser)]
+struct Cli {
+    /// Path to playbook
+    play: PathBuf,
+}
+
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     tracing_subscriber::fmt()
@@ -63,70 +88,122 @@ async fn main() -> eyre::Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    let handlers_example = r#"
----
-- name: "Do systemd daemon reload"
-  become: true
-  ansible.builtin.systemd:
-    daemon_reload: true
-  listen: "protocol-solana : Do systemd daemon reload"
+    let args = Cli::parse();
 
-- name: "Restart Solana service"
-  become: true
-  ansible.builtin.systemd:
-    name: "solana"
-    state: "restarted"
-  listen: "protocol-solana : Restart Solana service"
-"#;
+    // Load plays from the playbook
+    let plays: Vec<Play> = {
+        let file = File::open(&args.play)?;
+        serde_yaml::from_reader(file)?
+    };
 
-    let tasks_example = r#"
----
-- name: "Set validator binary name fact"
-  ansible.builtin.set_fact:
-    validator_binary_name: "agave-validator-jito"
-  when: >
-    solana_use_jito
+    let current_dir = std::env::current_dir()?;
+    let play_basedir = args.play.parent().unwrap_or(&current_dir);
 
-- name: "Write Solana systemd service"
-  become: true
-  ansible.builtin.template:
-    src: "solana.service.j2"
-    dest: "/etc/systemd/system/solana.service"
-    owner: "root"
-    group: "root"
-    mode: "0644"
-  notify:
-    - "protocol-solana : Do systemd daemon reload"
+    let _ = known_tasks();
 
-- name: "Enable Solana systemd service"
-  become: true
-  ansible.builtin.systemd:
-    name: "solana"
-    enabled: true
-  notify:
-    - "protocol-solana : Restart solana service"
+    // TODO: include inventory
+    for play in plays {
+        info!(name = play.name(), "processing play");
+        process_play(play_basedir, play).await?;
+    }
 
-- name: "Flush handlers"
-  ansible.builtin.meta: "flush_handlers"
-"#;
+    Ok(())
+}
 
-    let mut ctx: TaskContext = Default::default();
-    let role = None::<String>;
+async fn process_play(basedir: &Path, play: Play) -> eyre::Result<()> {
+    let ctx: TaskContext = Default::default();
 
-    let handlers: Vec<TaskDescription> = serde_yaml::from_str(handlers_example)?;
+    // Process pre_tasks
+    if let Some(pre_tasks) = play.pre_tasks {
+        process_tasks(Arc::clone(&ctx), pre_tasks, None, true).await?;
+    }
+
+    // Process roles
+    if let Some(roles) = play.roles {
+        for role in roles {
+            let role_basedir = basedir.join("roles").join(role.name());
+            process_role(Arc::clone(&ctx), &role_basedir, role).await?;
+        }
+    }
+
+    // Process tasks
+    if let Some(tasks) = play.tasks {
+        process_tasks(Arc::clone(&ctx), tasks, None, false).await?;
+    }
+
+    // Process role & tasks handlers here
+    run_handlers(Arc::clone(&ctx)).await?;
+
+    // Process post_tasks
+    if let Some(post_tasks) = play.post_tasks {
+        process_tasks(Arc::clone(&ctx), post_tasks, None, true).await?;
+    }
+
+    Ok(())
+}
+
+async fn register_handlers(
+    ctx: TaskContext,
+    handlers: Vec<TaskDescription>,
+    role: Option<&PlayRole>,
+) -> eyre::Result<()> {
     for handler in handlers {
         let task_id = handler.task_id.name();
         let name = match (&role, &handler.name) {
-            (Some(role), Some(name)) => format!("{role} : {name}"),
-            (Some(role), None) => format!("{role} : {}", handler.task_id.name()),
+            (Some(role), Some(name)) => format!("{} : {}", role.name(), name),
+            (Some(role), None) => format!("{} : {}", role.name(), handler.task_id.name()),
             (None, Some(name)) => name.to_string(),
             (None, None) => handler.task_id.name().to_string(),
         };
 
-        debug!(?role, name, task_id, "registered handler");
+        // TODO: actually register
+        // TODO: Register also unprefixed names
+        debug!(
+            role = role.map(PlayRole::name),
+            name, task_id, "registered handler"
+        );
     }
 
-    let tasks: Vec<TaskDescription> = serde_yaml::from_str(tasks_example)?;
+    Ok(())
+}
+
+async fn process_role(ctx: TaskContext, role_basedir: &Path, role: PlayRole) -> eyre::Result<()> {
+    // TODO: handle role path
+
+    // Load role defaults
+    let role_defaults: Option<HashMap<String, Value>> =
+        load_yaml(&role_basedir.join("defaults/main.yml"))?;
+    if let Some(defaults) = role_defaults {
+        let mut ctx = ctx.lock().await;
+        for (key, value) in defaults {
+            ctx.facts.entry(key).or_insert(value);
+        }
+    }
+
+    // Load role handlers
+    let handlers: Option<Vec<TaskDescription>> =
+        load_yaml(&role_basedir.join("handlers/main.yml"))?;
+    if let Some(handlers) = handlers {
+        register_handlers(Arc::clone(&ctx), handlers, Some(&role)).await?;
+    }
+
+    // Load role tasks
+    let tasks: Option<Vec<TaskDescription>> = load_yaml(&role_basedir.join("tasks/main.yml"))?;
+
+    if let Some(tasks) = tasks {
+        process_tasks(ctx, tasks, Some(role.name().to_string()), false).await?;
+    }
+
+    Ok(())
+}
+
+async fn process_tasks(
+    ctx: TaskContext,
+    // TODO: include handlers
+    tasks: Vec<TaskDescription>,
+    role: Option<String>,
+    flush_handlers: bool,
+) -> eyre::Result<()> {
     for task in tasks {
         let task_id = task.task_id.name();
         let name = match (&role, &task.name) {
@@ -151,12 +228,18 @@ async fn main() -> eyre::Result<()> {
         }
     }
 
-    {
-        let mut ctx = ctx.lock().await;
-        if !ctx.pending_handlers.is_empty() {
-            debug!("running pending handlers");
-            ctx.consume_pending_handlers()?;
-        }
+    if flush_handlers {
+        run_handlers(ctx).await?;
+    }
+
+    Ok(())
+}
+
+async fn run_handlers(ctx: TaskContext) -> eyre::Result<()> {
+    let mut ctx = ctx.lock().await;
+    if !ctx.pending_handlers.is_empty() {
+        debug!("running pending handlers");
+        ctx.consume_pending_handlers()?;
     }
 
     Ok(())

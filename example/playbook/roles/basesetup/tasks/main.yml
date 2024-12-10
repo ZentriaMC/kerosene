@@ -1,0 +1,4 @@
+---
+- name: "Set service username fact"
+  ansible.builtin.set_fact:
+    service_username: "svc"

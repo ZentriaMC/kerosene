@@ -1,10 +1,10 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Deserializer};
 use serde_yaml::Value;
 use tracing::debug;
 
-use crate::known_tasks;
-
-use super::TaskId;
+use crate::{known_tasks, task::TaskId};
 
 #[derive(Clone, Debug)]
 pub struct TaskDescription {
@@ -17,6 +17,7 @@ pub struct TaskDescription {
     pub when: Vec<String>,
     pub notify: Vec<String>,
     pub register: Option<String>,
+    pub vars: Option<HashMap<String, Value>>,
 }
 
 impl<'de> Deserialize<'de> for TaskDescription {
@@ -90,6 +91,7 @@ impl<'de> serde::de::Visitor<'de> for TaskVisitor {
         let mut when = None::<Vec<String>>;
         let mut notify = None::<Vec<String>>;
         let mut register = None::<String>;
+        let mut vars = None::<HashMap<String, Value>>;
         let mut listen = None::<String>;
 
         while let Some((key, value)) = map.next_entry::<String, Value>()? {
@@ -193,6 +195,16 @@ impl<'de> serde::de::Visitor<'de> for TaskVisitor {
                         return Err(serde::de::Error::custom("duplicate register"));
                     }
                 }
+                "vars" => {
+                    if vars.is_none() {
+                        vars = Some(
+                            HashMap::<String, Value>::deserialize(value)
+                                .map_err(|_| serde::de::Error::custom("vars is not a mapping"))?,
+                        )
+                    } else {
+                        return Err(serde::de::Error::custom("duplicate vars"));
+                    }
+                }
                 key => {
                     if let Some(task) = known_tasks().get(key) {
                         if task_id.is_none() {
@@ -218,6 +230,7 @@ impl<'de> serde::de::Visitor<'de> for TaskVisitor {
             when: when.unwrap_or_default(),
             notify: notify.unwrap_or_default(),
             register,
+            vars,
         })
     }
 }

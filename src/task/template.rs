@@ -45,7 +45,7 @@ impl StructuredTask for TemplateTask {
             self.mode.as_ref(),
         );
 
-        let mut ctx = context.lock().await;
+        let ctx = context.lock().await;
         ctx.run_remote_command(command)?;
 
         Ok(None)

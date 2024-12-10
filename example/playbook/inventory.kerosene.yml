@@ -1,0 +1,5 @@
+---
+# NOTE: custom inventory format for the time being
+all:
+  hosts:
+    localhost:

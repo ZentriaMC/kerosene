@@ -1,0 +1,28 @@
+---
+- name: "Set validator binary name fact"
+  ansible.builtin.set_fact:
+    validator_binary_name: "agave-validator-jito"
+  when: >
+    solana_use_jito
+
+- name: "Write Solana systemd service"
+  become: true
+  ansible.builtin.template:
+    src: "solana.service.j2"
+    dest: "/etc/systemd/system/solana.service"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  notify:
+    - "protocol-solana : Do systemd daemon reload"
+
+- name: "Enable Solana systemd service"
+  become: true
+  ansible.builtin.systemd:
+    name: "solana"
+    enabled: true
+  notify:
+    - "protocol-solana : Restart solana service"
+
+- name: "Flush handlers"
+  ansible.builtin.meta: "flush_handlers"

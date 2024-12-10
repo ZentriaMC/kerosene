@@ -1,0 +1,11 @@
+---
+- name: "Deploy"
+  hosts: "all"
+  pre_tasks: []
+  roles:
+    - "basesetup"
+    - role: "solana"
+      vars:
+        solana_use_jito: false
+  tasks: []
+  post_tasks: []
