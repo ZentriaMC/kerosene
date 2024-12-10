@@ -262,7 +262,7 @@ pub async fn run_handlers(context: TaskContext) -> eyre::Result<()> {
                 (task.run, handler.args.clone())
             };
 
-            debug!(handler_name, "running handler");
+            info!(handler_name, "running handler");
             let _ = (run)(Arc::clone(&context), args).await?;
         }
 
