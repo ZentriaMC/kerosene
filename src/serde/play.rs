@@ -19,8 +19,7 @@ pub struct Play {
 
 impl Play {
     pub fn name(&self) -> &str {
-        self.name.as_deref()
-            .unwrap_or(&self.hosts)
+        self.name.as_deref().unwrap_or(&self.hosts)
     }
 }
 

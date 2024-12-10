@@ -1,12 +1,13 @@
 use std::{
-    collections::HashMap,
-    fs::File,
-    io::ErrorKind,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{Arc, OnceLock},
 };
 
 use clap::Parser;
+use eyre::eyre;
+use kerosene::load_yaml;
+use serde::task::HandlerDescription;
 use serde_yaml::Value;
 use tracing::{debug, info, level_filters::LevelFilter, trace};
 use tracing_subscriber::EnvFilter;
@@ -57,21 +58,12 @@ pub fn get_task(id: &'static str) -> Option<&'static KeroseneTaskInfo> {
     None
 }
 
-fn load_yaml<T>(path: &Path) -> eyre::Result<Option<T>>
-where
-    T: ::serde::de::DeserializeOwned,
-{
-    let file = match File::open(path) {
-        Ok(file) => file,
-        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err.into()),
-    };
-
-    Ok(Some(serde_yaml::from_reader::<_, T>(file)?))
-}
-
 #[derive(Debug, Parser)]
 struct Cli {
+    /// Path to inventory file
+    #[arg(long, short = 'i')]
+    inventory: PathBuf,
+
     /// Path to playbook
     play: PathBuf,
 }
@@ -91,10 +83,8 @@ async fn main() -> eyre::Result<()> {
     let args = Cli::parse();
 
     // Load plays from the playbook
-    let plays: Vec<Play> = {
-        let file = File::open(&args.play)?;
-        serde_yaml::from_reader(file)?
-    };
+    let plays: Vec<Play> = load_yaml(&args.play)?
+        .ok_or_else(|| eyre!("playbook at '{:?}' could not be opened", &args.play))?;
 
     let current_dir = std::env::current_dir()?;
     let play_basedir = args.play.parent().unwrap_or(&current_dir);
@@ -144,23 +134,35 @@ async fn process_play(basedir: &Path, play: Play) -> eyre::Result<()> {
 
 async fn register_handlers(
     ctx: TaskContext,
-    handlers: Vec<TaskDescription>,
+    handlers: Vec<HandlerDescription>,
     role: Option<&PlayRole>,
 ) -> eyre::Result<()> {
+    let mut ctx = ctx.lock().await;
+
     for handler in handlers {
         let task_id = handler.task_id.name();
-        let name = match (&role, &handler.name) {
-            (Some(role), Some(name)) => format!("{} : {}", role.name(), name),
-            (Some(role), None) => format!("{} : {}", role.name(), handler.task_id.name()),
-            (None, Some(name)) => name.to_string(),
-            (None, None) => handler.task_id.name().to_string(),
-        };
 
-        // TODO: actually register
-        // TODO: Register also unprefixed names
+        let mut handler_names = HashSet::new();
+        if let Some(name) = &handler.name {
+            if let Some(role) = role {
+                handler_names.insert(format!("{} : {}", role.name(), name));
+            }
+            handler_names.insert(name.clone());
+        }
+
+        if let Some(listen) = &handler.listen {
+            handler_names.insert(listen.clone());
+        }
+
+        for name in &handler_names {
+            ctx.known_handlers.insert(name.clone(), handler.clone());
+        }
+
         debug!(
             role = role.map(PlayRole::name),
-            name, task_id, "registered handler"
+            names = ?handler_names,
+            task_id,
+            "registered handler"
         );
     }
 
@@ -181,7 +183,7 @@ async fn process_role(ctx: TaskContext, role_basedir: &Path, role: PlayRole) -> 
     }
 
     // Load role handlers
-    let handlers: Option<Vec<TaskDescription>> =
+    let handlers: Option<Vec<HandlerDescription>> =
         load_yaml(&role_basedir.join("handlers/main.yml"))?;
     if let Some(handlers) = handlers {
         register_handlers(Arc::clone(&ctx), handlers, Some(&role)).await?;
@@ -199,7 +201,6 @@ async fn process_role(ctx: TaskContext, role_basedir: &Path, role: PlayRole) -> 
 
 async fn process_tasks(
     ctx: TaskContext,
-    // TODO: include handlers
     tasks: Vec<TaskDescription>,
     role: Option<String>,
     flush_handlers: bool,
@@ -235,11 +236,38 @@ async fn process_tasks(
     Ok(())
 }
 
-async fn run_handlers(ctx: TaskContext) -> eyre::Result<()> {
-    let mut ctx = ctx.lock().await;
-    if !ctx.pending_handlers.is_empty() {
+pub async fn run_handlers(context: TaskContext) -> eyre::Result<()> {
+    // HACK: There's more elegant solution than this, but I don't want to
+    //       spend too much time here to design this architecture here to
+    //       avoid a deadlock. Just clone the pending handlers collection
+    //       instead.
+    let mut pending_handlers = {
+        let ctx = context.lock().await;
+        ctx.pending_handlers.clone()
+    };
+
+    if !pending_handlers.is_empty() {
         debug!("running pending handlers");
-        ctx.consume_pending_handlers()?;
+
+        while let Some(handler_name) = pending_handlers.pop_front() {
+            let (run, args) = {
+                let ctx = context.lock().await;
+                let handler = ctx
+                    .known_handlers
+                    .get(handler_name.as_str())
+                    .ok_or_else(|| eyre!("Handler '{}' is not declared", handler_name))?;
+
+                let task = get_task(handler.task_id.name()).unwrap();
+
+                (task.run, handler.args.clone())
+            };
+
+            debug!(handler_name, "running handler");
+            let _ = (run)(Arc::clone(&context), args).await?;
+        }
+
+        let mut ctx = context.lock().await;
+        ctx.pending_handlers.clear();
     }
 
     Ok(())

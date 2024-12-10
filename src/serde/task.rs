@@ -25,13 +25,18 @@ impl<'de> Deserialize<'de> for TaskDescription {
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_struct(
+        let result = deserializer.deserialize_struct(
             "task",
             &[],
             TaskVisitor {
                 expect_handler: false,
             },
-        )
+        )?;
+
+        match result {
+            TaskOrHandler::Task(task) => Ok(task),
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -44,8 +49,33 @@ pub struct HandlerDescription {
     pub become_user: Option<String>,
 
     pub when: Vec<String>,
-    // TODO!
-    pub listen: String,
+    pub listen: Option<String>,
+    pub vars: Option<HashMap<String, Value>>,
+}
+
+impl<'de> Deserialize<'de> for HandlerDescription {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let result = deserializer.deserialize_struct(
+            "handler",
+            &[],
+            TaskVisitor {
+                expect_handler: true,
+            },
+        )?;
+
+        match result {
+            TaskOrHandler::Handler(handler) => Ok(handler),
+            _ => unreachable!(),
+        }
+    }
+}
+
+enum TaskOrHandler {
+    Task(TaskDescription),
+    Handler(HandlerDescription),
 }
 
 struct TaskVisitor {
@@ -53,10 +83,14 @@ struct TaskVisitor {
 }
 
 impl<'de> serde::de::Visitor<'de> for TaskVisitor {
-    type Value = TaskDescription;
+    type Value = TaskOrHandler;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(formatter, "task")
+        if self.expect_handler {
+            write!(formatter, "handler")
+        } else {
+            write!(formatter, "task")
+        }
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
@@ -221,16 +255,35 @@ impl<'de> serde::de::Visitor<'de> for TaskVisitor {
         }
 
         let _ = listen;
-        Ok(TaskDescription {
-            name,
-            task_id: task_id.unwrap(),
-            args: args.unwrap(),
-            r#become: r#become.unwrap_or_default(),
-            become_user,
-            when: when.unwrap_or_default(),
-            notify: notify.unwrap_or_default(),
-            register,
-            vars,
+        Ok(if self.expect_handler {
+            if name.is_none() && listen.is_none() {
+                return Err(serde::de::Error::custom(
+                    "handler is expected to have at least name or listen",
+                ));
+            }
+
+            TaskOrHandler::Handler(HandlerDescription {
+                name,
+                task_id: task_id.unwrap(),
+                args: args.unwrap(),
+                r#become: r#become.unwrap_or_default(),
+                become_user,
+                when: when.unwrap_or_default(),
+                listen,
+                vars,
+            })
+        } else {
+            TaskOrHandler::Task(TaskDescription {
+                name,
+                task_id: task_id.unwrap(),
+                args: args.unwrap(),
+                r#become: r#become.unwrap_or_default(),
+                become_user,
+                when: when.unwrap_or_default(),
+                notify: notify.unwrap_or_default(),
+                register,
+                vars,
+            })
         })
     }
 }

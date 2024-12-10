@@ -23,8 +23,7 @@ impl StructuredTask for MetaTask {
         match &self.0 {
             MetaTaskAction::FlushHandlers => {
                 debug!("flushing pending handlers");
-                let mut ctx = context.lock().await;
-                ctx.consume_pending_handlers()?;
+                crate::run_handlers(context).await?;
             }
             MetaTaskAction::Unknown(action) => {
                 warn!(?action, "unsupported meta action")

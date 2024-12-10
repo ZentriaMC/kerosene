@@ -9,7 +9,9 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde_yaml::Value;
 use tokio::sync::Mutex;
-use tracing::{debug, trace};
+use tracing::trace;
+
+use crate::serde::task::HandlerDescription;
 
 pub mod copy;
 pub mod curl;
@@ -39,23 +41,16 @@ impl TaskId {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct TaskContextInner {
     pub facts: HashMap<String, Value>,
     pub do_become_user: Option<String>,
     pub pending_handlers: VecDeque<String>,
+
+    pub known_handlers: HashMap<String, HandlerDescription>,
 }
 
 impl TaskContextInner {
-    pub fn consume_pending_handlers(&mut self) -> eyre::Result<()> {
-        while let Some(handler_name) = self.pending_handlers.pop_front() {
-            // TODO: run handler
-            debug!(handler_name, "running handler");
-        }
-
-        Ok(())
-    }
-
     pub fn run_remote_command(&self, command: Vec<&str>) -> eyre::Result<()> {
         trace!(?command, become = self.do_become_user, "running remotely");
         Ok(())

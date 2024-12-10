@@ -10,4 +10,5 @@
   ansible.builtin.systemd:
     name: "solana"
     state: "restarted"
-  listen: "protocol-solana : Restart Solana service"
+    no_block: true
+  listen: "protocol-solana : Restart solana service"
