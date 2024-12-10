@@ -1,0 +1,20 @@
+[package]
+name = "kerosene"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = "0.1.83"
+clap = { version = "4.5.22", features = ["derive", "env"] }
+eyre = "0.6.12"
+inventory = "0.3.15"
+minijinja = { version = "2.5.0", features = ["json"] }
+russh = "0.48.2"
+russh-config = "0.48.0"
+serde = { version = "1.0.215", features = ["derive"] }
+serde_yaml = "0.9.34"
+structstruck = "0.4.1"
+tokio = { version = "1.42.0", features = ["macros", "rt-multi-thread"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+url = { version = "2.5.4", features = ["serde"] }
