@@ -45,7 +45,7 @@ impl StructuredTask for CopyTask {
         );
 
         let ctx = context.lock().await;
-        ctx.run_remote_command(command)?;
+        ctx.run_command(None, command)?;
 
         Ok(None)
     }

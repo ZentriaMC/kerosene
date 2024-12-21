@@ -1,23 +1,31 @@
 use std::{
     collections::{HashMap, VecDeque},
+    ffi::OsString,
     future::Future,
+    ops::Deref,
     pin::Pin,
+    process::Stdio,
     sync::Arc,
 };
 
 use async_trait::async_trait;
+use eyre::Context;
 use serde::de::DeserializeOwned;
 use serde_yaml::Value;
 use tokio::sync::Mutex;
 use tracing::trace;
 
-use crate::serde::task::HandlerDescription;
+use crate::{
+    command::{CommandExt, CommandTarget, PreparedCommand},
+    serde::task::HandlerDescription,
+};
 
 pub mod copy;
 pub mod curl;
 pub mod import_tasks;
 pub mod meta;
 pub mod set_fact;
+pub mod shell;
 pub mod systemd;
 pub mod template;
 
@@ -44,6 +52,7 @@ impl TaskId {
 #[derive(Debug, Default)]
 pub struct TaskContextInner {
     pub facts: HashMap<String, Value>,
+    pub command_target: CommandTarget,
     pub do_become_user: Option<String>,
     pub pending_handlers: VecDeque<String>,
 
@@ -51,13 +60,78 @@ pub struct TaskContextInner {
 }
 
 impl TaskContextInner {
-    pub fn run_remote_command(&self, command: Vec<&str>) -> eyre::Result<()> {
-        trace!(?command, become = self.do_become_user, "running remotely");
+    pub fn run_command(
+        &self,
+        working_directory: Option<&str>,
+        command: Vec<&str>,
+    ) -> eyre::Result<()> {
+        trace!(?command, become = self.do_become_user, "running command");
+
+        // TODO: become_method
+        let mut command_target = self.command_target.clone();
+        if let Some(become_user) = &self.do_become_user {
+            match &mut command_target {
+                CommandTarget::Local { elevate, .. } => {
+                    *elevate = Some(vec![
+                        "sudo".to_string(),
+                        format!("--user={}", become_user),
+                        "--".to_string(),
+                    ]);
+                }
+                CommandTarget::Remote { elevate, .. } => {
+                    *elevate = Some(vec![
+                        "sudo".to_string(),
+                        format!("--user={}", become_user),
+                        "--".to_string(),
+                    ]);
+                }
+            }
+        }
+
+        let first = command.first().unwrap();
+        let args = if command.len() > 1 {
+            Vec::from(&command[1..])
+        } else {
+            Vec::new()
+        };
+
+        let mut child = PreparedCommand::new(&command_target, first)
+            .chdir(working_directory.map(OsString::from))
+            .args(args)
+            .to_command()
+            .stdin(Stdio::null())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .wrap_err("failed to spawn child")?;
+
+        let _ = child.wait()?.ensure_success()?;
+
         Ok(())
     }
 }
 
-pub type TaskContext = Arc<Mutex<TaskContextInner>>;
+#[derive(Clone, Debug, Default)]
+pub struct TaskContext {
+    inner: Arc<Mutex<TaskContextInner>>,
+}
+
+impl Deref for TaskContext {
+    type Target = Arc<Mutex<TaskContextInner>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl TaskContext {
+    pub fn new() -> Self {
+        Self {
+            inner: Default::default(),
+        }
+    }
+}
+
 pub type TaskResult = eyre::Result<Option<Value>>;
 pub type TaskFut = Pin<Box<dyn Future<Output = TaskResult> + Send + 'static>>;
 pub type TaskRun = dyn Fn(TaskContext, Value) -> TaskFut + Send + Sync + 'static;

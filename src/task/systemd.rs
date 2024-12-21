@@ -39,7 +39,7 @@ impl StructuredTask for SystemdTask {
     async fn run_structured(&self, context: TaskContext) -> TaskResult {
         if self.daemon_reload.unwrap_or_default() {
             let ctx = context.lock().await;
-            ctx.run_remote_command(vec!["systemctl", "daemon-reload"])?;
+            ctx.run_command(None, vec!["systemctl", "daemon-reload"])?;
         }
 
         if let Some(enabled) = self.enabled {
@@ -62,7 +62,7 @@ impl StructuredTask for SystemdTask {
             command.push(name.as_str());
 
             let ctx = context.lock().await;
-            ctx.run_remote_command(command)?;
+            ctx.run_command(None, command)?;
         }
 
         if let Some(mask) = self.masked {
@@ -85,7 +85,7 @@ impl StructuredTask for SystemdTask {
             command.push(name.as_str());
 
             let ctx = context.lock().await;
-            ctx.run_remote_command(command)?;
+            ctx.run_command(None, command)?;
         }
 
         if let Some(state) = self.state.as_ref() {
@@ -110,7 +110,7 @@ impl StructuredTask for SystemdTask {
             command.push(name);
 
             let ctx = context.lock().await;
-            ctx.run_remote_command(command)?;
+            ctx.run_command(None, command)?;
         }
 
         Ok(None)

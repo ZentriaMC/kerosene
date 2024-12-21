@@ -1,10 +1,11 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::{Arc, OnceLock},
+    sync::OnceLock,
 };
 
 use clap::Parser;
+use command::CommandTarget;
 use eyre::eyre;
 use kerosene::load_yaml;
 use serde::task::HandlerDescription;
@@ -12,6 +13,7 @@ use serde_yaml::Value;
 use tracing::{debug, info, level_filters::LevelFilter, trace};
 use tracing_subscriber::EnvFilter;
 
+pub mod command;
 pub mod serde;
 pub mod task;
 
@@ -105,28 +107,28 @@ async fn process_play(basedir: &Path, play: Play) -> eyre::Result<()> {
 
     // Process pre_tasks
     if let Some(pre_tasks) = play.pre_tasks {
-        process_tasks(Arc::clone(&ctx), pre_tasks, None, true).await?;
+        process_tasks(ctx.clone(), pre_tasks, None, true).await?;
     }
 
     // Process roles
     if let Some(roles) = play.roles {
         for role in roles {
             let role_basedir = basedir.join("roles").join(role.name());
-            process_role(Arc::clone(&ctx), &role_basedir, role).await?;
+            process_role(ctx.clone(), &role_basedir, role).await?;
         }
     }
 
     // Process tasks
     if let Some(tasks) = play.tasks {
-        process_tasks(Arc::clone(&ctx), tasks, None, false).await?;
+        process_tasks(ctx.clone(), tasks, None, false).await?;
     }
 
     // Process role & tasks handlers here
-    run_handlers(Arc::clone(&ctx)).await?;
+    run_handlers(ctx.clone()).await?;
 
     // Process post_tasks
     if let Some(post_tasks) = play.post_tasks {
-        process_tasks(Arc::clone(&ctx), post_tasks, None, true).await?;
+        process_tasks(ctx.clone(), post_tasks, None, true).await?;
     }
 
     Ok(())
@@ -186,7 +188,7 @@ async fn process_role(ctx: TaskContext, role_basedir: &Path, role: PlayRole) -> 
     let handlers: Option<Vec<HandlerDescription>> =
         load_yaml(&role_basedir.join("handlers/main.yml"))?;
     if let Some(handlers) = handlers {
-        register_handlers(Arc::clone(&ctx), handlers, Some(&role)).await?;
+        register_handlers(ctx.clone(), handlers, Some(&role)).await?;
     }
 
     // Load role tasks
@@ -222,10 +224,34 @@ async fn process_tasks(
             None
         };
 
-        let _ = (task_info.run)(Arc::clone(&ctx), task.args.clone()).await?;
+        let prev_command_target: Option<CommandTarget> = if let Some(delegate_to) = task.delegate_to
+        {
+            if delegate_to == "localhost" || delegate_to == "127.0.0.1" {
+                let mut ctx_inner = ctx.lock().await;
+                Some(std::mem::replace(
+                    &mut ctx_inner.command_target,
+                    // TODO
+                    CommandTarget::Local {
+                        elevate: None,
+                        dry: false,
+                    },
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let _ = (task_info.run)(ctx.clone(), task.args.clone()).await?;
         for notify in task.notify {
             let mut ctx = ctx.lock().await;
             ctx.pending_handlers.push_back(notify);
+        }
+
+        if let Some(command_target) = prev_command_target {
+            let mut ctx_inner = ctx.lock().await;
+            ctx_inner.command_target = command_target;
         }
     }
 
@@ -263,7 +289,7 @@ pub async fn run_handlers(context: TaskContext) -> eyre::Result<()> {
             };
 
             info!(handler_name, "running handler");
-            let _ = (run)(Arc::clone(&context), args).await?;
+            let _ = (run)(context.clone(), args).await?;
         }
 
         let mut ctx = context.lock().await;

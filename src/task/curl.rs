@@ -32,7 +32,7 @@ impl StructuredTask for Curl {
         }
 
         let ctx = context.lock().await;
-        ctx.run_remote_command(command.iter().map(String::as_str).collect())?;
+        ctx.run_command(None, command.iter().map(String::as_str).collect())?;
 
         Ok(None)
     }

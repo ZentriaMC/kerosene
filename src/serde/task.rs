@@ -13,6 +13,7 @@ pub struct TaskDescription {
     pub args: Value,
     pub r#become: bool,
     pub become_user: Option<String>,
+    pub delegate_to: Option<String>,
 
     pub when: Vec<String>,
     pub notify: Vec<String>,
@@ -122,6 +123,7 @@ impl<'de> serde::de::Visitor<'de> for TaskVisitor {
         let mut args = None::<Value>;
         let mut r#become = None::<bool>;
         let mut become_user = None::<String>;
+        let mut delegate_to = None::<String>;
         let mut when = None::<Vec<String>>;
         let mut notify = None::<Vec<String>>;
         let mut register = None::<String>;
@@ -140,6 +142,18 @@ impl<'de> serde::de::Visitor<'de> for TaskVisitor {
                         );
                     } else {
                         return Err(serde::de::Error::custom("duplicate name"));
+                    }
+                }
+                "delegate_to" => {
+                    if delegate_to.is_none() {
+                        delegate_to = Some(
+                            value
+                                .as_str()
+                                .map(str::to_owned)
+                                .ok_or(serde::de::Error::custom("delegate_to is not a string"))?,
+                        );
+                    } else {
+                        return Err(serde::de::Error::custom("duplicate delegate_to"));
                     }
                 }
                 "become" => {
@@ -279,6 +293,7 @@ impl<'de> serde::de::Visitor<'de> for TaskVisitor {
                 args: args.unwrap(),
                 r#become: r#become.unwrap_or_default(),
                 become_user,
+                delegate_to,
                 when: when.unwrap_or_default(),
                 notify: notify.unwrap_or_default(),
                 register,
