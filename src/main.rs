@@ -103,7 +103,7 @@ async fn main() -> eyre::Result<()> {
 }
 
 async fn process_play(basedir: &Path, play: Play) -> eyre::Result<()> {
-    let ctx: TaskContext = Default::default();
+    let ctx: TaskContext = TaskContext::new(basedir.to_path_buf());
 
     // Process pre_tasks
     if let Some(pre_tasks) = play.pre_tasks {
@@ -114,7 +114,12 @@ async fn process_play(basedir: &Path, play: Play) -> eyre::Result<()> {
     if let Some(roles) = play.roles {
         for role in roles {
             let role_basedir = basedir.join("roles").join(role.name());
+            ctx.lock()
+                .await
+                .resource_dirs
+                .push_front(role_basedir.clone());
             process_role(ctx.clone(), &role_basedir, role).await?;
+            ctx.lock().await.resource_dirs.pop_front().unwrap();
         }
     }
 
@@ -124,6 +129,7 @@ async fn process_play(basedir: &Path, play: Play) -> eyre::Result<()> {
     }
 
     // Process role & tasks handlers here
+    // TODO: resource dirs & ctx if handler is coming from a role!
     run_handlers(ctx.clone()).await?;
 
     // Process post_tasks

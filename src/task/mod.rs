@@ -1,8 +1,11 @@
 use std::{
     collections::{HashMap, VecDeque},
     ffi::OsString,
+    fmt::Debug,
     future::Future,
+    io::{Read, Write},
     ops::Deref,
+    path::PathBuf,
     pin::Pin,
     process::Stdio,
     sync::Arc,
@@ -49,8 +52,40 @@ impl TaskId {
     }
 }
 
+pub enum StdinSource {
+    Reader(Box<dyn Read + Send>),
+    Bytes(Vec<u8>),
+}
+
+#[derive(Default)]
+pub struct RunCommandOpts<'a> {
+    command: Vec<&'a str>,
+    working_directory: Option<&'a str>,
+    stdin: Option<StdinSource>,
+}
+
+impl Debug for RunCommandOpts<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RunCommandOpts")
+            .field("command", &self.command)
+            .field("working_directory", &self.working_directory)
+            .field(
+                "stdin",
+                if self.stdin.is_some() {
+                    &"present"
+                } else {
+                    &"absent"
+                },
+            )
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct TaskContextInner {
+    pub play_basedir: PathBuf,
+    pub resource_dirs: VecDeque<PathBuf>,
+
     pub facts: HashMap<String, Value>,
     pub command_target: CommandTarget,
     pub do_become_user: Option<String>,
@@ -65,6 +100,20 @@ impl TaskContextInner {
         working_directory: Option<&str>,
         command: Vec<&str>,
     ) -> eyre::Result<()> {
+        self.run_command_opts(RunCommandOpts {
+            command,
+            working_directory,
+            ..Default::default()
+        })
+    }
+
+    pub fn run_command_opts(&self, opts: RunCommandOpts) -> eyre::Result<()> {
+        let RunCommandOpts {
+            command,
+            working_directory,
+            stdin,
+        } = opts;
+
         trace!(?command, become = self.do_become_user, "running command");
 
         // TODO: become_method
@@ -99,11 +148,30 @@ impl TaskContextInner {
             .chdir(working_directory.map(OsString::from))
             .args(args)
             .to_command()
-            .stdin(Stdio::null())
+            .stdin(if stdin.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .spawn()
             .wrap_err("failed to spawn child")?;
+
+        if let Some(source) = stdin {
+            let mut child_stdin = child.stdin.take().unwrap();
+            match source {
+                StdinSource::Bytes(bytes) => {
+                    child_stdin
+                        .write_all(&bytes)
+                        .wrap_err("failed to write stdin")?;
+                }
+                StdinSource::Reader(mut reader) => {
+                    std::io::copy(&mut reader, &mut child_stdin)
+                        .wrap_err("failed to write stdin")?;
+                }
+            }
+        }
 
         let _ = child.wait()?.ensure_success()?;
 
@@ -125,9 +193,12 @@ impl Deref for TaskContext {
 }
 
 impl TaskContext {
-    pub fn new() -> Self {
+    pub fn new(play_basedir: PathBuf) -> Self {
         Self {
-            inner: Default::default(),
+            inner: Arc::new(Mutex::new(TaskContextInner {
+                play_basedir,
+                ..Default::default()
+            })),
         }
     }
 }

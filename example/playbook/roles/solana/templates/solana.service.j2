@@ -1,0 +1,16 @@
+[Unit]
+Description=Solana Validator
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+User={{ service_username }}
+LimitNOFILE=1048576
+LogRateLimitIntervalSec=0
+ExecStart={% if solana_use_jito %}agave-validator-jito{% else %}agave-validator{% endif %}
+
+[Install]
+WantedBy=multi-user.target
