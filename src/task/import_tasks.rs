@@ -10,8 +10,7 @@ use super::{Task, TaskContext, TaskResult};
 strike! {
     #[strikethrough[derive(Debug, Deserialize)]]
     pub struct ImportTasks {
-        #[serde(flatten)]
-        pub action: String,
+        pub file: String,
     }
 }
 
