@@ -13,6 +13,8 @@ use super::{StructuredTask, TaskContext, TaskResult};
 strike! {
     #[strikethrough[derive(Debug, Deserialize)]]
     pub struct SetFactTask {
+        #[serde(default)]
+        pub cacheable: bool,
         #[serde(flatten)]
         pub facts: HashMap<String, Value>,
     }
@@ -24,7 +26,7 @@ impl StructuredTask for SetFactTask {
         let mut context = context.lock().await;
 
         for (key, value) in &self.facts {
-            debug!(key, ?value, "setting fact");
+            debug!(key, cacheable = self.cacheable, ?value, "setting fact");
             context.facts.insert(key.clone(), value.clone());
         }
 
