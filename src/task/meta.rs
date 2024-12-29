@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use eyre::eyre;
 use serde::Deserialize;
 use structstruck::strike;
 use tracing::{debug, warn};
@@ -11,7 +12,15 @@ strike! {
     #[strikethrough[derive(Debug, Deserialize)]]
     pub struct MetaTask(enum MetaTaskAction {
         #![serde(rename_all = "snake_case")]
+        ClearFacts,
+        ClearHostErrors,
+        EndBatch,
+        EndHost,
+        EndPlay,
         FlushHandlers,
+        Noop,
+        RefreshInventory,
+        ResetConnection,
         #[serde(untagged)]
         Unknown(serde_yaml::Value),
     });
@@ -25,8 +34,16 @@ impl StructuredTask for MetaTask {
                 debug!("flushing pending handlers");
                 crate::run_handlers(context).await?;
             }
+            MetaTaskAction::Noop => {}
+            MetaTaskAction::ResetConnection => {
+                debug!("triggering reset on command target");
+                context.lock().await.command_target.reset().await?;
+            }
             MetaTaskAction::Unknown(action) => {
-                warn!(?action, "unsupported meta action")
+                return Err(eyre!("unknown meta action: {:?}", action));
+            }
+            action => {
+                warn!(?action, "unhandled meta action");
             }
         }
 

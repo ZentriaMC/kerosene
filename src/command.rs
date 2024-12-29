@@ -160,6 +160,20 @@ impl Default for CommandTarget {
     }
 }
 
+impl CommandTarget {
+    pub async fn reset(&self) -> eyre::Result<()> {
+        match self {
+            Self::Local { .. } => {}
+            Self::Remote { hostname, dry, .. } if !*dry => {
+                // TODO: ssh -O exit ${hostname}
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+}
+
 pub trait CommandExt: Sized {
     fn ensure_success(self) -> eyre::Result<Self>;
 }
