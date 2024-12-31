@@ -17,6 +17,9 @@ strike! {
 #[async_trait]
 impl Task for ImportTasks {
     async fn run(context: TaskContext, value: Value) -> TaskResult {
+        let _ = context;
+        let _ = value;
+
         Ok(None)
     }
 }
