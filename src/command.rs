@@ -83,7 +83,7 @@ impl<'a> PreparedCommand<'a> {
                 ..
             } => {
                 let ssh = OsString::from("ssh");
-                let mut args = Vec::new();
+                let mut args: Vec<OsString> = vec!["-oClearAllForwardings=yes".into()];
 
                 args.push(OsString::from(if let Some(user) = user {
                     format!("{user}@{hostname}")
