@@ -4,7 +4,7 @@ use std::{
     process::{Command, ExitStatus},
 };
 
-use eyre::eyre;
+use eyre::{eyre, Context};
 use tracing::{debug, Level};
 
 pub struct PreparedCommand<'a> {
@@ -165,7 +165,21 @@ impl CommandTarget {
         match self {
             Self::Local { .. } => {}
             Self::Remote { hostname, dry, .. } if !*dry => {
-                // TODO: ssh -O exit ${hostname}
+                let status = PreparedCommand::new(&CommandTarget::default(), "ssh")
+                    .arg("-Oexit")
+                    .arg(hostname)
+                    .to_command()
+                    .spawn()
+                    .wrap_err("failed to spawn ssh")?
+                    .wait()
+                    .wrap_err("failed to wait for ssh to exit")?;
+
+                return match status.code() {
+                    Some(exit_code) if exit_code != 0 || exit_code != 255 => {
+                        Err(eyre!("unexpected ssh exit code: {exit_code}"))
+                    }
+                    Some(_) | None => Ok(()),
+                };
             }
             _ => {}
         }
