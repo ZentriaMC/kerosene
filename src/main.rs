@@ -282,19 +282,25 @@ pub async fn run_handlers(context: TaskContext) -> eyre::Result<()> {
         debug!("running pending handlers");
 
         while let Some(handler_name) = pending_handlers.pop_front() {
-            let (run, args) = {
+            let (run, args, become_user) = {
                 let ctx = context.lock().await;
                 let handler = ctx
                     .known_handlers
                     .get(handler_name.as_str())
                     .ok_or_else(|| eyre!("Handler '{}' is not declared", handler_name))?;
 
-                let task = get_task(handler.task_id.name()).unwrap();
+                let become_user = if handler.r#become {
+                    Some(handler.become_user.clone().unwrap_or("root".to_string()))
+                } else {
+                    None
+                };
 
-                (task.run, handler.args.clone())
+                let task = get_task(handler.task_id.name()).unwrap();
+                (task.run, handler.args.clone(), become_user)
             };
 
             info!(handler_name, "running handler");
+            context.lock().await.do_become_user = become_user;
             let _ = (run)(context.clone(), args).await?;
         }
 
