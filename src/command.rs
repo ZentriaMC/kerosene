@@ -56,78 +56,78 @@ impl<'a> PreparedCommand<'a> {
         self
     }
 
-    pub fn full_command(&self) -> Vec<&OsStr> {
-        let mut cmd = vec![self.command.as_os_str()];
-        cmd.extend(self.args.iter().map(OsString::as_os_str));
-        cmd
-    }
-
-    pub fn to_command(&self) -> Command {
-        if tracing::enabled!(Level::DEBUG) {
-            debug!(command = ?self.full_command(), "running");
-        }
-
+    fn prepare_command(&self) -> (OsString, Vec<OsString>) {
         match self.target {
-            CommandTarget::Local { dry, elevate } => {
-                let mut cmd = if !self.read_only && *dry {
-                    return std::process::Command::new("true");
-                } else if let Some(elevate) = elevate {
-                    let first = elevate.first().unwrap();
-                    let args = &elevate[1..];
+            CommandTarget::Local { dry, .. } | CommandTarget::Remote { dry, .. }
+                if !self.read_only && *dry =>
+            {
+                (OsString::from("true"), Default::default())
+            }
 
-                    let mut cmd = std::process::Command::new(first);
-                    cmd.args(args);
-                    cmd.arg(&self.command);
-                    cmd
-                } else {
-                    std::process::Command::new(&self.command)
-                };
+            CommandTarget::Local { elevate: None, .. } => (self.command.clone(), self.args.clone()),
+            CommandTarget::Local {
+                elevate: Some(elevate),
+                ..
+            } => {
+                let cmd = OsString::from(elevate.first().unwrap());
+                let mut args = Vec::from_iter(elevate[1..].iter().map(OsString::from));
+                args.push(self.command.clone());
+                args.extend(self.args.clone());
 
-                cmd.args(&self.args);
-                if let Some(chdir) = &self.working_directory {
-                    cmd.current_dir(chdir);
-                }
-                cmd
+                (cmd, args)
             }
             CommandTarget::Remote {
                 hostname,
                 user,
                 elevate,
-                dry,
+                ..
             } => {
-                if !self.read_only && *dry {
-                    return std::process::Command::new("true");
-                }
+                let ssh = OsString::from("ssh");
+                let mut args = Vec::new();
 
-                let target = if let Some(user) = user {
+                args.push(OsString::from(if let Some(user) = user {
                     format!("{user}@{hostname}")
                 } else {
                     hostname.to_owned()
-                };
-
-                let mut cmd = std::process::Command::new("ssh");
-                cmd.arg(target);
-
-                if let Some(chdir) = &self.working_directory {
-                    cmd.args(["env", "--chdir"]);
-                    cmd.arg(chdir);
-                }
+                }));
 
                 if let Some(elevate) = elevate {
-                    cmd.args(elevate);
+                    args.extend(elevate.iter().map(OsString::from));
+                }
+
+                if let Some(chdir) = &self.working_directory {
+                    args.push(OsString::from("env"));
+                    args.push(OsString::from("--chdir"));
+                    args.push(chdir.to_owned());
                 }
 
                 // XXX: turns out when passing backslashes to ssh, they need
                 //      to be escaped twice
-                // c.args(&self.args);
-
-                cmd.arg(self.command.to_str().unwrap().replace("\\", "\\\\"));
+                args.push(self.command.to_str().unwrap().replace("\\", "\\\\").into());
                 for arg in &self.args {
-                    cmd.arg(arg.to_str().unwrap().replace("\\", "\\\\"));
+                    args.push(arg.to_str().unwrap().replace("\\", "\\\\").into());
                 }
-                cmd
+
+                (ssh, args)
             }
         }
+    }
+
+    pub fn to_command(&self) -> Command {
+        let (command, args) = self.prepare_command();
+        let working_directory = self.working_directory.as_ref();
+        if tracing::enabled!(Level::DEBUG) {
+            debug!(?command, ?args, ?working_directory, "running");
+        }
+
+        let mut cmd = std::process::Command::new(command);
+        if let (CommandTarget::Local { .. }, Some(working_directory)) =
+            (self.target, working_directory)
+        {
+            cmd.current_dir(working_directory);
+        }
+        cmd.args(args);
+        cmd
     }
 }
 
