@@ -56,6 +56,14 @@ impl<'a> PreparedCommand<'a> {
         self
     }
 
+    pub fn escape_shell_arg(arg: &str) -> String {
+        arg.replace("\\", "\\\\")
+           .replace(" ", "\\ ") 
+           .replace("\"", "\\\"")
+           .replace("'", "\\'")
+           .replace("|", "\\|")
+    }
+
     fn prepare_command(&self) -> (OsString, Vec<OsString>) {
         match self.target {
             CommandTarget::Local { dry, .. } | CommandTarget::Remote { dry, .. }
@@ -103,9 +111,9 @@ impl<'a> PreparedCommand<'a> {
 
                 // XXX: turns out when passing backslashes to ssh, they need
                 //      to be escaped twice
-                args.push(self.command.to_str().unwrap().replace("\\", "\\\\").into());
+                args.push(Self::escape_shell_arg(self.command.to_str().unwrap()).into());
                 for arg in &self.args {
-                    args.push(arg.to_str().unwrap().replace("\\", "\\\\").into());
+                    args.push(Self::escape_shell_arg(arg.to_str().unwrap()).into());
                 }
 
                 (ssh, args)
