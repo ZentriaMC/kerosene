@@ -58,10 +58,10 @@ impl<'a> PreparedCommand<'a> {
 
     pub fn escape_shell_arg(arg: &str) -> String {
         arg.replace("\\", "\\\\")
-           .replace(" ", "\\ ") 
-           .replace("\"", "\\\"")
-           .replace("'", "\\'")
-           .replace("|", "\\|")
+            .replace(" ", "\\ ")
+            .replace("\"", "\\\"")
+            .replace("'", "\\'")
+            .replace("|", "\\|")
     }
 
     fn prepare_command(&self) -> (OsString, Vec<OsString>) {
