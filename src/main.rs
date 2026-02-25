@@ -118,8 +118,18 @@ async fn process_play(basedir: &Path, play: Play) -> eyre::Result<()> {
                 .await
                 .resource_dirs
                 .push_front(role_basedir.clone());
-            process_role(ctx.clone(), &role_basedir, role).await?;
-            ctx.lock().await.resource_dirs.pop_front().unwrap();
+
+            let result = process_role(ctx.clone(), &role_basedir, role).await;
+
+            // Always clean up role-scoped state, even on error
+            {
+                let mut ctx_inner = ctx.lock().await;
+                ctx_inner.resource_dirs.pop_front();
+                ctx_inner.role_defaults.clear();
+                ctx_inner.role_play_vars.clear();
+            }
+
+            result?;
         }
     }
 
@@ -128,8 +138,7 @@ async fn process_play(basedir: &Path, play: Play) -> eyre::Result<()> {
         process_tasks(ctx.clone(), tasks, None, false).await?;
     }
 
-    // Process role & tasks handlers here
-    // TODO: resource dirs & ctx if handler is coming from a role!
+    // Process role & tasks handlers
     run_handlers(ctx.clone()).await?;
 
     // Process post_tasks
@@ -144,10 +153,12 @@ async fn register_handlers(
     ctx: TaskContext,
     handlers: Vec<HandlerDescription>,
     role: Option<&PlayRole>,
+    role_resource_dir: Option<PathBuf>,
 ) -> eyre::Result<()> {
     let mut ctx = ctx.lock().await;
 
-    for handler in handlers {
+    for mut handler in handlers {
+        handler.role_resource_dir = role_resource_dir.clone();
         let task_id = handler.task_id.name();
 
         let mut handler_names = HashSet::new();
@@ -180,21 +191,29 @@ async fn register_handlers(
 async fn process_role(ctx: TaskContext, role_basedir: &Path, role: PlayRole) -> eyre::Result<()> {
     // TODO: handle role path
 
-    // Load role defaults
-    let role_defaults: Option<HashMap<String, Value>> =
+    // Load role defaults into scoped role_defaults (not persistent facts)
+    let defaults: Option<HashMap<String, Value>> =
         load_yaml(&role_basedir.join("defaults/main.yml"))?;
-    if let Some(defaults) = role_defaults {
-        let mut ctx = ctx.lock().await;
-        for (key, value) in defaults {
-            ctx.facts.entry(key).or_insert(value);
-        }
+    if let Some(defaults) = defaults {
+        ctx.lock().await.role_defaults = defaults;
+    }
+
+    // Inject play-level role vars into scoped role_play_vars
+    if let Some(vars) = role.vars() {
+        ctx.lock().await.role_play_vars = vars.clone();
     }
 
     // Load role handlers
     let handlers: Option<Vec<HandlerDescription>> =
         load_yaml(&role_basedir.join("handlers/main.yml"))?;
     if let Some(handlers) = handlers {
-        register_handlers(ctx.clone(), handlers, Some(&role)).await?;
+        register_handlers(
+            ctx.clone(),
+            handlers,
+            Some(&role),
+            Some(role_basedir.to_path_buf()),
+        )
+        .await?;
     }
 
     // Load role tasks
@@ -282,7 +301,7 @@ pub async fn run_handlers(context: TaskContext) -> eyre::Result<()> {
         debug!("running pending handlers");
 
         while let Some(handler_name) = pending_handlers.pop_front() {
-            let (run, args, become_user) = {
+            let (run, args, become_user, role_resource_dir) = {
                 let ctx = context.lock().await;
                 let handler = ctx
                     .known_handlers
@@ -296,12 +315,29 @@ pub async fn run_handlers(context: TaskContext) -> eyre::Result<()> {
                 };
 
                 let task = get_task(handler.task_id.name()).unwrap();
-                (task.run, handler.args.clone(), become_user)
+                (
+                    task.run,
+                    handler.args.clone(),
+                    become_user,
+                    handler.role_resource_dir.clone(),
+                )
             };
+
+            // Push handler's role resource dir so it can resolve role-local files
+            if let Some(ref dir) = role_resource_dir {
+                context.lock().await.resource_dirs.push_front(dir.clone());
+            }
 
             info!(handler_name, "running handler");
             context.lock().await.do_become_user = become_user;
-            let _ = (run)(context.clone(), args).await?;
+            let result = (run)(context.clone(), args).await;
+
+            // Always clean up resource dir, even on error
+            if role_resource_dir.is_some() {
+                context.lock().await.resource_dirs.pop_front();
+            }
+
+            let _ = result?;
         }
 
         let mut ctx = context.lock().await;

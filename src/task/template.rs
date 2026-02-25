@@ -69,7 +69,7 @@ impl StructuredTask for TemplateTask {
             _ => todo!("unsupported template task source"),
         };
 
-        let render_context = minijinja::Value::from_serialize(&ctx.facts);
+        let render_context = minijinja::Value::from_serialize(ctx.merged_vars());
         let rendered =
             environment.render_named_str(&template_path, &template_src, render_context)?;
 

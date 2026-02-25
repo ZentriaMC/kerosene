@@ -40,4 +40,11 @@ impl PlayRole {
             Self::Role { role, .. } => role,
         }
     }
+
+    pub fn vars(&self) -> Option<&HashMap<String, Value>> {
+        match self {
+            Self::RoleName(_) => None,
+            Self::Role { vars, .. } => vars.as_ref(),
+        }
+    }
 }

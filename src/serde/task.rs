@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Deserializer};
 use serde_yaml::Value;
@@ -52,6 +53,10 @@ pub struct HandlerDescription {
     pub when: Vec<String>,
     pub listen: Option<String>,
     pub vars: Option<HashMap<String, Value>>,
+
+    /// Resource directory context from the role this handler belongs to.
+    /// Set during `register_handlers`, not during deserialization.
+    pub role_resource_dir: Option<PathBuf>,
 }
 
 impl<'de> Deserialize<'de> for HandlerDescription {
@@ -285,6 +290,7 @@ impl<'de> serde::de::Visitor<'de> for TaskVisitor {
                 when: when.unwrap_or_default(),
                 listen,
                 vars,
+                role_resource_dir: None,
             })
         } else {
             TaskOrHandler::Task(TaskDescription {
