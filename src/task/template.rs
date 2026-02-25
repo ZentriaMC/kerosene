@@ -3,7 +3,7 @@ use eyre::Context;
 use serde::Deserialize;
 use structstruck::strike;
 
-use crate::task::KeroseneTaskInfo;
+use crate::{render, task::KeroseneTaskInfo};
 
 use super::{
     copy::{build_install_command, resolve_local_file},
@@ -69,7 +69,8 @@ impl StructuredTask for TemplateTask {
             _ => todo!("unsupported template task source"),
         };
 
-        let render_context = minijinja::Value::from_serialize(ctx.merged_vars());
+        let resolved_vars = render::resolve_vars(&ctx.merged_vars())?;
+        let render_context = minijinja::Value::from_serialize(&resolved_vars);
         let rendered =
             environment.render_named_str(&template_path, &template_src, render_context)?;
 

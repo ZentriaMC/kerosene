@@ -14,6 +14,7 @@ use tracing::{debug, info, level_filters::LevelFilter, trace};
 use tracing_subscriber::EnvFilter;
 
 pub mod command;
+pub mod render;
 pub mod serde;
 pub mod task;
 
@@ -268,10 +269,14 @@ async fn process_tasks(
             None
         };
 
-        let _ = (task_info.run)(ctx.clone(), task.args.clone()).await?;
+        let resolved_vars = render::resolve_vars(&ctx.lock().await.merged_vars())?;
+        let rendered_args = render::render_value(&task.args, &resolved_vars)?;
+
+        let _ = (task_info.run)(ctx.clone(), rendered_args).await?;
         for notify in task.notify {
+            let rendered_notify = render::render_str(&notify, &resolved_vars)?;
             let mut ctx = ctx.lock().await;
-            ctx.pending_handlers.push_back(notify);
+            ctx.pending_handlers.push_back(rendered_notify);
         }
 
         if let Some(command_target) = prev_command_target {
