@@ -4,9 +4,11 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    fcos-harness.url = "github:ZentriaMC/fcos-harness";
+    fcos-harness.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, flake-utils, ... }:
+  outputs = { self, nixpkgs, flake-utils, fcos-harness, ... }:
     let
       supportedSystems = [
         "aarch64-darwin"
@@ -26,8 +28,8 @@
           packages = [
             pkgs.butane
             pkgs.jq
-            pkgs.python3
             pkgs.qemu
+            fcos-harness.packages.${system}.default
           ];
 
           BUTANE = "${pkgs.butane}/bin/butane";
