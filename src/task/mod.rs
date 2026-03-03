@@ -5,6 +5,7 @@ use std::{
     future::Future,
     io::{Read, Write},
     ops::Deref,
+    os::unix::process::ExitStatusExt,
     path::PathBuf,
     pin::Pin,
     process::Stdio,
@@ -59,9 +60,10 @@ pub enum StdinSource {
 
 #[derive(Default)]
 pub struct RunCommandOpts<'a> {
-    command: Vec<&'a str>,
-    working_directory: Option<&'a str>,
-    stdin: Option<StdinSource>,
+    pub command: Vec<&'a str>,
+    pub working_directory: Option<&'a str>,
+    pub stdin: Option<StdinSource>,
+    pub capture: bool,
 }
 
 impl Debug for RunCommandOpts<'_> {
@@ -77,8 +79,16 @@ impl Debug for RunCommandOpts<'_> {
                     &"absent"
                 },
             )
+            .field("capture", &self.capture)
             .finish_non_exhaustive()
     }
+}
+
+#[derive(Debug)]
+pub struct CommandOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub rc: i32,
 }
 
 #[derive(Debug, Default)]
@@ -119,7 +129,7 @@ impl TaskContextInner {
         &self,
         working_directory: Option<&str>,
         command: Vec<&str>,
-    ) -> eyre::Result<()> {
+    ) -> eyre::Result<CommandOutput> {
         self.run_command_opts(RunCommandOpts {
             command,
             working_directory,
@@ -127,14 +137,15 @@ impl TaskContextInner {
         })
     }
 
-    pub fn run_command_opts(&self, opts: RunCommandOpts) -> eyre::Result<()> {
+    pub fn run_command_opts(&self, opts: RunCommandOpts) -> eyre::Result<CommandOutput> {
         let RunCommandOpts {
             command,
             working_directory,
             stdin,
+            capture,
         } = opts;
 
-        trace!(?command, become = self.do_become_user, "running command");
+        trace!(?command, become = self.do_become_user, capture, "running command");
 
         // TODO: become_method
         let mut command_target = self.command_target.clone();
@@ -173,8 +184,16 @@ impl TaskContextInner {
             } else {
                 Stdio::null()
             })
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
+            .stdout(if capture {
+                Stdio::piped()
+            } else {
+                Stdio::inherit()
+            })
+            .stderr(if capture {
+                Stdio::piped()
+            } else {
+                Stdio::inherit()
+            })
             .spawn()
             .wrap_err("failed to spawn child")?;
 
@@ -191,11 +210,22 @@ impl TaskContextInner {
                         .wrap_err("failed to write stdin")?;
                 }
             }
+            // Drop stdin so the child sees EOF
+            drop(child_stdin);
         }
 
-        let _ = child.wait()?.ensure_success()?;
+        let output = child.wait_with_output().wrap_err("failed to wait for child")?;
+        let rc = output
+            .status
+            .code()
+            .unwrap_or_else(|| 128 + output.status.signal().unwrap_or(0));
 
-        Ok(())
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+
+        output.status.ensure_success()?;
+
+        Ok(CommandOutput { stdout, stderr, rc })
     }
 }
 

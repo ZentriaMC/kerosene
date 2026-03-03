@@ -1,10 +1,11 @@
 use async_trait::async_trait;
 use serde::Deserialize;
+use serde_yaml::Value;
 use structstruck::strike;
 
 use crate::task::KeroseneTaskInfo;
 
-use super::{StructuredTask, TaskContext, TaskContextInner, TaskResult};
+use super::{RunCommandOpts, StructuredTask, TaskContext, TaskContextInner, TaskResult};
 
 strike! {
     #[strikethrough[derive(Debug, Deserialize)]]
@@ -29,12 +30,28 @@ impl StructuredTask for ShellTask {
             .as_deref()
             .unwrap_or(default_executable(&ctx));
 
-        ctx.run_command(
-            self.chdir.as_deref(),
-            vec![executable, "-c", self.cmd.as_str()],
-        )?;
+        let output = ctx.run_command_opts(RunCommandOpts {
+            command: vec![executable, "-c", self.cmd.as_str()],
+            working_directory: self.chdir.as_deref(),
+            capture: true,
+            ..Default::default()
+        })?;
 
-        Ok(None)
+        let mut result = serde_yaml::Mapping::new();
+        result.insert(
+            Value::String("stdout".into()),
+            Value::String(output.stdout.trim_end_matches('\n').into()),
+        );
+        result.insert(
+            Value::String("stderr".into()),
+            Value::String(output.stderr.trim_end_matches('\n').into()),
+        );
+        result.insert(
+            Value::String("rc".into()),
+            Value::Number(output.rc.into()),
+        );
+
+        Ok(Some(Value::Mapping(result)))
     }
 }
 

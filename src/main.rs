@@ -272,7 +272,11 @@ async fn process_tasks(
         let resolved_vars = render::resolve_vars(&ctx.lock().await.merged_vars())?;
         let rendered_args = render::render_value(&task.args, &resolved_vars)?;
 
-        let _ = (task_info.run)(ctx.clone(), rendered_args).await?;
+        let result = (task_info.run)(ctx.clone(), rendered_args).await?;
+        if let (Some(register), Some(value)) = (&task.register, result) {
+            debug!(register, "registering output");
+            ctx.lock().await.facts.insert(register.clone(), value);
+        }
         for notify in task.notify {
             let rendered_notify = render::render_str(&notify, &resolved_vars)?;
             let mut ctx = ctx.lock().await;
