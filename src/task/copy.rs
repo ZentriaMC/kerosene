@@ -3,7 +3,6 @@ use std::{collections::VecDeque, path::PathBuf};
 use async_trait::async_trait;
 use eyre::{eyre, Context};
 use serde::Deserialize;
-use structstruck::strike;
 use tracing::trace;
 
 use crate::task::KeroseneTaskInfo;
@@ -12,57 +11,53 @@ use super::{
     RunCommandOpts, StdinSource, StructuredTask, TaskContext, TaskContextInner, TaskResult,
 };
 
-strike! {
-    #[strikethrough[derive(Debug, Deserialize)]]
-    pub struct CopyTask {
-        #[serde(flatten)]
-        pub src: enum CopyTaskSource {
-            File {
-                #[serde(rename = "src")]
-                file: String,
-
-                #[serde(default)]
-                remote_src: bool,
-            }
-            Content { content: String }
-        },
-        pub dest: String,
-        #[serde(default)]
-        pub owner: Option<String>,
-        #[serde(default)]
-        pub group: Option<String>,
-        #[serde(default)]
-        pub mode: Option<String>,
-    }
+#[derive(Debug, Deserialize)]
+pub struct CopyTask {
+    #[serde(default, rename = "src")]
+    pub file: Option<String>,
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub remote_src: bool,
+    pub dest: String,
+    #[serde(default)]
+    pub owner: Option<String>,
+    #[serde(default)]
+    pub group: Option<String>,
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 #[async_trait]
 impl StructuredTask for CopyTask {
     async fn run_structured(&self, context: TaskContext) -> TaskResult {
+        let remote_src_file = match (&self.file, self.remote_src) {
+            (Some(file), true) => Some(file),
+            _ => None,
+        };
+
         let (command, _use_pipe) = build_install_command(
             &self.dest,
-            match &self.src {
-                CopyTaskSource::File { file, remote_src } if *remote_src => Some(file),
-                _ => None,
-            },
+            remote_src_file,
             self.owner.as_ref(),
             self.group.as_ref(),
             self.mode.as_ref(),
         );
 
         let ctx = context.lock().await;
-        let stdin = match &self.src {
-            CopyTaskSource::Content { content } => {
-                Some(StdinSource::Bytes(content.as_bytes().into()))
-            }
-            CopyTaskSource::File { file, remote_src } if !*remote_src => {
+        let stdin = if let Some(content) = &self.content {
+            Some(StdinSource::Bytes(content.as_bytes().into()))
+        } else if let Some(file) = &self.file {
+            if !self.remote_src {
                 let file_path = resolve_local_file(&ctx, "files", file).await?;
                 let reader =
                     std::fs::File::open(file_path).wrap_err("failed to open local file")?;
-
                 Some(StdinSource::Reader(Box::new(reader)))
+            } else {
+                None
             }
-            _ => None,
+        } else {
+            return Err(eyre!("copy task requires either 'src' or 'content'"));
         };
 
         ctx.run_command_opts(RunCommandOpts {
