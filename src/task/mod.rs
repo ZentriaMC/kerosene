@@ -167,7 +167,7 @@ impl TaskContextInner {
         let mut child = PreparedCommand::new(&command_target, first)
             .chdir(working_directory.map(OsString::from))
             .args(args)
-            .to_command()
+            .to_command()?
             .stdin(if stdin.is_some() {
                 Stdio::piped()
             } else {

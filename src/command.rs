@@ -56,25 +56,62 @@ impl<'a> PreparedCommand<'a> {
         self
     }
 
-    fn prepare_command(&self) -> (OsString, Vec<OsString>) {
+    fn build_shell_command_string(
+        elevate: Option<&[String]>,
+        working_directory: Option<&OsString>,
+        command: &OsStr,
+        args: &[OsString],
+    ) -> eyre::Result<String> {
+        let mut parts: Vec<&str> = Vec::new();
+
+        if let Some(elevate) = elevate {
+            parts.extend(elevate.iter().map(String::as_str));
+        }
+
+        if let Some(chdir) = working_directory {
+            parts.extend(["env", "--chdir"]);
+            parts.push(
+                chdir
+                    .to_str()
+                    .ok_or_else(|| eyre!("working directory is not valid UTF-8"))?,
+            );
+        }
+
+        parts.push(
+            command
+                .to_str()
+                .ok_or_else(|| eyre!("command is not valid UTF-8"))?,
+        );
+        for arg in args {
+            parts.push(
+                arg.to_str()
+                    .ok_or_else(|| eyre!("argument is not valid UTF-8"))?,
+            );
+        }
+
+        shlex::try_join(parts.iter().copied())
+            .map_err(|e| eyre!("failed to shell-quote command: {e}"))
+    }
+
+    fn prepare_command(&self) -> eyre::Result<(OsString, Vec<OsString>)> {
         match self.target {
             CommandTarget::Local { dry, .. } | CommandTarget::Remote { dry, .. }
                 if !self.read_only && *dry =>
             {
-                (OsString::from("true"), Default::default())
+                Ok((OsString::from("true"), Default::default()))
             }
 
-            CommandTarget::Local { elevate: None, .. } => (self.command.clone(), self.args.clone()),
-            CommandTarget::Local {
-                elevate: Some(elevate),
-                ..
-            } => {
-                let cmd = OsString::from(elevate.first().unwrap());
-                let mut args = Vec::from_iter(elevate[1..].iter().map(OsString::from));
-                args.push(self.command.clone());
-                args.extend(self.args.clone());
-
-                (cmd, args)
+            CommandTarget::Local { elevate, .. } => {
+                let shell_cmd = Self::build_shell_command_string(
+                    elevate.as_deref(),
+                    self.working_directory.as_ref(),
+                    &self.command,
+                    &self.args,
+                )?;
+                Ok((
+                    OsString::from("sh"),
+                    vec![OsString::from("-c"), OsString::from(shell_cmd)],
+                ))
             }
             CommandTarget::Remote {
                 hostname,
@@ -82,7 +119,13 @@ impl<'a> PreparedCommand<'a> {
                 elevate,
                 ..
             } => {
-                let ssh = OsString::from("ssh");
+                let shell_cmd = Self::build_shell_command_string(
+                    elevate.as_deref(),
+                    self.working_directory.as_ref(),
+                    &self.command,
+                    &self.args,
+                )?;
+
                 let mut args: Vec<OsString> = vec!["-oClearAllForwardings=yes".into()];
 
                 args.push(OsString::from(if let Some(user) = user {
@@ -90,52 +133,26 @@ impl<'a> PreparedCommand<'a> {
                 } else {
                     hostname.to_owned()
                 }));
+                args.push(OsString::from(shell_cmd));
 
-                if let Some(elevate) = elevate {
-                    args.extend(elevate.iter().map(OsString::from));
-                }
-
-                if let Some(chdir) = &self.working_directory {
-                    args.push(OsString::from("env"));
-                    args.push(OsString::from("--chdir"));
-                    args.push(chdir.to_owned());
-                }
-
-                // XXX: turns out when passing backslashes to ssh, they need
-                //      to be escaped twice
-                args.push(self.command.to_str().unwrap().replace("\\", "\\\\").into());
-                for arg in &self.args {
-                    args.push(arg.to_str().unwrap().replace("\\", "\\\\").into());
-                }
-
-                (ssh, args)
+                Ok((OsString::from("ssh"), args))
             }
         }
     }
 
-    pub fn to_command(&self) -> Command {
-        let (command, args) = self.prepare_command();
+    pub fn to_command(&self) -> eyre::Result<Command> {
+        let (command, args) = self.prepare_command()?;
         let working_directory = self.working_directory.as_ref();
         if tracing::enabled!(Level::DEBUG) {
             debug!(?command, ?args, ?working_directory, "running");
         }
 
         let mut cmd = std::process::Command::new(command);
-        if let (CommandTarget::Local { .. }, Some(working_directory)) =
-            (self.target, working_directory)
-        {
-            cmd.current_dir(working_directory);
-        }
         cmd.args(args);
-        cmd
+        Ok(cmd)
     }
 }
 
-impl From<PreparedCommand<'_>> for Command {
-    fn from(value: PreparedCommand<'_>) -> Self {
-        value.to_command()
-    }
-}
 
 #[derive(Clone, Debug)]
 pub enum CommandTarget {
@@ -165,10 +182,11 @@ impl CommandTarget {
         match self {
             Self::Local { .. } => {}
             Self::Remote { hostname, dry, .. } if !*dry => {
-                let status = PreparedCommand::new(&CommandTarget::default(), "ssh")
+                let local = CommandTarget::default();
+                let status = PreparedCommand::new(&local, "ssh")
                     .arg("-Oexit")
                     .arg(hostname)
-                    .to_command()
+                    .to_command()?
                     .spawn()
                     .wrap_err("failed to spawn ssh")?
                     .wait()

@@ -1111,6 +1111,7 @@ dependencies = [
  "russh-config",
  "serde",
  "serde_yaml",
+ "shlex",
  "structstruck",
  "tokio",
  "tracing",
