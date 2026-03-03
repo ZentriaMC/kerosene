@@ -14,10 +14,12 @@ use tracing::{debug, info, level_filters::LevelFilter, trace};
 use tracing_subscriber::EnvFilter;
 
 pub mod command;
+pub mod inventory;
 pub mod render;
 pub mod serde;
 pub mod task;
 
+use crate::inventory::{is_localhost, Inventory};
 use crate::serde::{
     play::{Play, PlayRole},
     task::TaskDescription,
@@ -29,7 +31,7 @@ pub fn known_tasks() -> &'static HashMap<&'static str, TaskId> {
 
     TASKS.get_or_init(|| {
         let mut all_tasks = HashMap::new();
-        for task in inventory::iter::<self::task::KeroseneTaskInfo> {
+        for task in ::inventory::iter::<self::task::KeroseneTaskInfo> {
             all_tasks.insert(task.fqdn, TaskId::Task(task.fqdn));
             if let Some(aliases) = task.aliases {
                 for alias in aliases {
@@ -51,7 +53,7 @@ pub fn known_tasks() -> &'static HashMap<&'static str, TaskId> {
 
 pub fn get_task(id: &'static str) -> Option<&'static KeroseneTaskInfo> {
     if let Some(task_id) = known_tasks().get(id) {
-        for task in inventory::iter::<self::task::KeroseneTaskInfo> {
+        for task in ::inventory::iter::<self::task::KeroseneTaskInfo> {
             if task.fqdn == task_id.name() {
                 return Some(task);
             }
@@ -94,17 +96,47 @@ async fn main() -> eyre::Result<()> {
 
     let _ = known_tasks();
 
-    // TODO: include inventory
+    // Load inventory
+    let inv: Inventory = load_yaml(&args.inventory)?
+        .ok_or_else(|| eyre!("inventory at '{:?}' could not be opened", &args.inventory))?;
+
     for play in plays {
-        info!(name = play.name(), "processing play");
-        process_play(play_basedir, play).await?;
+        let hosts = inv.resolve_hosts(&play.hosts)?;
+
+        for host in &hosts {
+            info!(name = play.name(), host = host.name, "processing play");
+
+            let command_target = if is_localhost(host) {
+                CommandTarget::Local {
+                    elevate: None,
+                    dry: false,
+                }
+            } else {
+                CommandTarget::Remote {
+                    hostname: host.hostname.clone(),
+                    user: host.user.clone().or(play.remote_user.clone()),
+                    port: host.port,
+                    ssh_key: host.ssh_key.clone(),
+                    ssh_extra_args: host.ssh_extra_args.clone(),
+                    elevate: None,
+                    dry: false,
+                }
+            };
+
+            process_play(play_basedir, play.clone(), command_target).await?;
+        }
     }
 
     Ok(())
 }
 
-async fn process_play(basedir: &Path, play: Play) -> eyre::Result<()> {
+async fn process_play(
+    basedir: &Path,
+    play: Play,
+    command_target: CommandTarget,
+) -> eyre::Result<()> {
     let ctx: TaskContext = TaskContext::new(basedir.to_path_buf());
+    ctx.lock().await.command_target = command_target;
 
     // Process pre_tasks
     if let Some(pre_tasks) = play.pre_tasks {

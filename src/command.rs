@@ -116,6 +116,9 @@ impl<'a> PreparedCommand<'a> {
             CommandTarget::Remote {
                 hostname,
                 user,
+                port,
+                ssh_key,
+                ssh_extra_args,
                 elevate,
                 ..
             } => {
@@ -127,6 +130,16 @@ impl<'a> PreparedCommand<'a> {
                 )?;
 
                 let mut args: Vec<OsString> = vec!["-oClearAllForwardings=yes".into()];
+
+                if let Some(port) = port {
+                    args.push(format!("-oPort={port}").into());
+                }
+
+                if let Some(key) = ssh_key {
+                    args.push(format!("-oIdentityFile={key}").into());
+                }
+
+                args.extend(ssh_extra_args.iter().map(OsString::from));
 
                 args.push(OsString::from(if let Some(user) = user {
                     format!("{user}@{hostname}")
@@ -163,6 +176,9 @@ pub enum CommandTarget {
     Remote {
         hostname: String,
         user: Option<String>,
+        port: Option<u16>,
+        ssh_key: Option<String>,
+        ssh_extra_args: Vec<String>,
         elevate: Option<Vec<String>>,
         dry: bool,
     },
@@ -181,11 +197,31 @@ impl CommandTarget {
     pub async fn reset(&self) -> eyre::Result<()> {
         match self {
             Self::Local { .. } => {}
-            Self::Remote { hostname, dry, .. } if !*dry => {
+            Self::Remote {
+                hostname,
+                user,
+                port,
+                ssh_key,
+                ssh_extra_args,
+                dry,
+                ..
+            } if !*dry => {
                 let local = CommandTarget::default();
-                let status = PreparedCommand::new(&local, "ssh")
-                    .arg("-Oexit")
-                    .arg(hostname)
+                let mut cmd = PreparedCommand::new(&local, "ssh");
+                cmd.arg("-Oexit");
+                if let Some(port) = port {
+                    cmd.arg(format!("-oPort={port}"));
+                }
+                if let Some(key) = ssh_key {
+                    cmd.arg(format!("-oIdentityFile={key}"));
+                }
+                cmd.args(ssh_extra_args);
+                cmd.arg(if let Some(user) = user {
+                    format!("{user}@{hostname}")
+                } else {
+                    hostname.to_owned()
+                });
+                let status = cmd
                     .to_command()?
                     .spawn()
                     .wrap_err("failed to spawn ssh")?

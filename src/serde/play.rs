@@ -5,7 +5,7 @@ use serde_yaml::Value;
 
 use super::task::TaskDescription;
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Play {
     pub name: Option<String>,
     pub hosts: String,
@@ -23,7 +23,7 @@ impl Play {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
 pub enum PlayRole {
     RoleName(String),
