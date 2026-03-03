@@ -163,3 +163,5 @@ tramp
 !.env.example
 
 # Project specific files
+/tmp/
+hack/init/*.ign

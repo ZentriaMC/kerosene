@@ -1,0 +1,101 @@
+---
+- name: "Kerosene E2E Tests"
+  hosts: "all"
+  remote_user: "core"
+  tasks:
+    # --- Test 1: Shell execution over SSH ---
+    - name: "Test shell: echo to file"
+      become: true
+      shell:
+        cmd: "echo 'shell-test-ok' > /tmp/kerosene-shell-test.txt"
+
+    - name: "Test shell: verify output"
+      shell:
+        cmd: "cat /tmp/kerosene-shell-test.txt"
+
+    # --- Test 2: Copy with content mode ---
+    - name: "Test copy content: write file"
+      become: true
+      copy:
+        content: "copy-content-ok"
+        dest: "/tmp/kerosene-copy-content.txt"
+        mode: "0644"
+
+    - name: "Test copy content: verify"
+      shell:
+        cmd: "test \"$(cat /tmp/kerosene-copy-content.txt)\" = 'copy-content-ok'"
+
+    # --- Test 3: Copy with src mode ---
+    - name: "Test copy src: upload file"
+      become: true
+      copy:
+        src: "files/hello.txt"
+        dest: "/tmp/kerosene-copy-src.txt"
+        mode: "0644"
+
+    - name: "Test copy src: verify"
+      shell:
+        cmd: "grep -q 'Hello from kerosene' /tmp/kerosene-copy-src.txt"
+
+    # --- Test 4: set_fact + template rendering ---
+    - name: "Test set_fact: define variables"
+      set_fact:
+        target_user: "core"
+        os_name: "Fedora CoreOS"
+
+    - name: "Test template: render and deploy"
+      become: true
+      template:
+        src: "templates/greeting.txt.j2"
+        dest: "/tmp/kerosene-template.txt"
+        mode: "0644"
+
+    - name: "Test template: verify rendered content"
+      shell:
+        cmd: "grep -q 'Hello, core! You are running Fedora CoreOS.' /tmp/kerosene-template.txt"
+
+    # --- Test 5: Become/sudo ---
+    - name: "Test become: write to root-owned path"
+      become: true
+      shell:
+        cmd: "echo 'become-ok' > /etc/kerosene-become-test.txt"
+
+    - name: "Test become: verify root ownership"
+      shell:
+        cmd: "test \"$(stat -c '%U' /etc/kerosene-become-test.txt)\" = 'root'"
+
+    # --- Test 6: Working directory (chdir) ---
+    - name: "Test chdir: run in specific directory"
+      shell:
+        cmd: "test \"$(pwd)\" = /tmp"
+        chdir: "/tmp"
+
+    # --- Test 7: Register command output ---
+    - name: "Test register: capture hostname"
+      shell:
+        cmd: "hostname"
+      register: "hostname_result"
+
+    - name: "Test register: use captured output"
+      shell:
+        cmd: "echo 'host={{ hostname_result.stdout }}' > /tmp/kerosene-register.txt"
+
+    - name: "Test register: verify"
+      shell:
+        cmd: "grep -q 'host=kerosene-test' /tmp/kerosene-register.txt"
+
+    # --- Test 8: Shell escaping ---
+    - name: "Test shell escaping: special characters"
+      shell:
+        cmd: "echo 'hello \"world\"' > /tmp/kerosene-escape-test.txt && grep -q 'hello \"world\"' /tmp/kerosene-escape-test.txt"
+
+    - name: "Test shell escaping: dollar signs"
+      shell:
+        cmd: "echo '$HOME is set' > /tmp/kerosene-escape-test2.txt && grep -q '\\$HOME is set' /tmp/kerosene-escape-test2.txt"
+
+    # --- Cleanup ---
+    - name: "Cleanup test artifacts"
+      become: true
+      shell:
+        cmd: "rm -f /tmp/kerosene-*.txt /etc/kerosene-*.txt"
+

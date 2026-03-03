@@ -1,0 +1,9 @@
+---
+all:
+  hosts:
+    testvm:
+      ansible_host: 127.0.0.1
+      ansible_port: 2223
+      ansible_user: core
+      ansible_ssh_private_key_file: hack/dev/dev_ed25519
+      ansible_ssh_extra_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
