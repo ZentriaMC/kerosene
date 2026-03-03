@@ -276,7 +276,11 @@ async fn process_tasks(
             (None, None) => task.task_id.name().to_string(),
         };
 
-        info!(?role, name, task_id, "running task");
+        if let Some(role) = &role {
+            info!(role, name, task_id, "running task");
+        } else {
+            info!(name, task_id, "running task");
+        }
         let task_info = get_task(task_id).unwrap();
         ctx.lock().await.do_become_user = if task.r#become {
             Some(task.become_user.unwrap_or("root".to_string()))
