@@ -26,6 +26,7 @@
           packages = [
             pkgs.butane
             pkgs.jq
+            pkgs.python3
             pkgs.qemu
           ];
 
