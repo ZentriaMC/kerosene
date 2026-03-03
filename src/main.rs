@@ -307,6 +307,8 @@ async fn process_tasks(
             None
         };
 
+        ctx.lock().await.task_vars = task.vars.unwrap_or_default();
+
         let resolved_vars = render::resolve_vars(&ctx.lock().await.merged_vars())?;
         let rendered_args = render::render_value(&task.args, &resolved_vars)?;
 
@@ -320,6 +322,8 @@ async fn process_tasks(
             let mut ctx = ctx.lock().await;
             ctx.pending_handlers.push_back(rendered_notify);
         }
+
+        ctx.lock().await.task_vars.clear();
 
         if let Some(command_target) = prev_command_target {
             let mut ctx_inner = ctx.lock().await;
@@ -348,7 +352,7 @@ pub async fn run_handlers(context: TaskContext) -> eyre::Result<()> {
         debug!("running pending handlers");
 
         while let Some(handler_name) = pending_handlers.pop_front() {
-            let (run, args, become_user, role_resource_dir) = {
+            let (run, args, become_user, role_resource_dir, handler_vars) = {
                 let ctx = context.lock().await;
                 let handler = ctx
                     .known_handlers
@@ -367,6 +371,7 @@ pub async fn run_handlers(context: TaskContext) -> eyre::Result<()> {
                     handler.args.clone(),
                     become_user,
                     handler.role_resource_dir.clone(),
+                    handler.vars.clone().unwrap_or_default(),
                 )
             };
 
@@ -376,12 +381,20 @@ pub async fn run_handlers(context: TaskContext) -> eyre::Result<()> {
             }
 
             info!(handler_name, "running handler");
-            context.lock().await.do_become_user = become_user;
+            {
+                let mut ctx = context.lock().await;
+                ctx.do_become_user = become_user;
+                ctx.task_vars = handler_vars;
+            }
             let result = (run)(context.clone(), args).await;
 
-            // Always clean up resource dir, even on error
-            if role_resource_dir.is_some() {
-                context.lock().await.resource_dirs.pop_front();
+            // Always clean up resource dir and task vars, even on error
+            {
+                let mut ctx = context.lock().await;
+                ctx.task_vars.clear();
+                if role_resource_dir.is_some() {
+                    ctx.resource_dirs.pop_front();
+                }
             }
 
             let _ = result?;

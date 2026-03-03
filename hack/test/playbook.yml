@@ -84,7 +84,36 @@
       shell:
         cmd: "grep -q 'host=kerosene-test' /tmp/kerosene-register.txt"
 
-    # --- Test 8: Shell escaping ---
+    # --- Test 8: Task-level vars ---
+    - name: "Test task vars: use variable from vars"
+      shell:
+        cmd: "echo '{{ greeting }}' > /tmp/kerosene-task-vars.txt"
+      vars:
+        greeting: "task-vars-ok"
+
+    - name: "Test task vars: verify"
+      shell:
+        cmd: "test \"$(cat /tmp/kerosene-task-vars.txt)\" = 'task-vars-ok'"
+
+    - name: "Test task vars: override set_fact"
+      shell:
+        cmd: "echo '{{ os_name }}' > /tmp/kerosene-task-vars-override.txt"
+      vars:
+        os_name: "overridden"
+
+    - name: "Test task vars: verify override"
+      shell:
+        cmd: "test \"$(cat /tmp/kerosene-task-vars-override.txt)\" = 'overridden'"
+
+    - name: "Test task vars: verify scoping (no leak to next task)"
+      shell:
+        cmd: "echo '{{ os_name }}' > /tmp/kerosene-task-vars-noleak.txt"
+
+    - name: "Test task vars: verify no leak"
+      shell:
+        cmd: "test \"$(cat /tmp/kerosene-task-vars-noleak.txt)\" = 'Fedora CoreOS'"
+
+    # --- Test 9: Shell escaping ---
     - name: "Test shell escaping: special characters"
       shell:
         cmd: "echo 'hello \"world\"' > /tmp/kerosene-escape-test.txt && grep -q 'hello \"world\"' /tmp/kerosene-escape-test.txt"

@@ -96,13 +96,15 @@ pub struct TaskContextInner {
     pub play_basedir: PathBuf,
     pub resource_dirs: VecDeque<PathBuf>,
 
-    /// Three-layer variable system (lowest to highest precedence):
+    /// Four-layer variable system (lowest to highest precedence):
     /// 1. `role_defaults` — from `roles/<name>/defaults/main.yml`, scoped per role
     /// 2. `facts` — from `set_fact`, persists across the entire play
     /// 3. `role_play_vars` — from play's role definition `vars:`, scoped per role
+    /// 4. `task_vars` — from `vars:` on individual tasks/handlers, scoped per task
     pub role_defaults: HashMap<String, Value>,
     pub facts: HashMap<String, Value>,
     pub role_play_vars: HashMap<String, Value>,
+    pub task_vars: HashMap<String, Value>,
 
     pub command_target: CommandTarget,
     pub do_become_user: Option<String>,
@@ -113,7 +115,7 @@ pub struct TaskContextInner {
 
 impl TaskContextInner {
     /// Returns the effective variable set with Ansible-correct precedence:
-    /// `role_play_vars` > `facts` > `role_defaults`
+    /// `task_vars` > `role_play_vars` > `facts` > `role_defaults`
     pub fn merged_vars(&self) -> HashMap<String, Value> {
         let mut merged = self.role_defaults.clone();
         merged.extend(self.facts.iter().map(|(k, v)| (k.clone(), v.clone())));
@@ -122,6 +124,7 @@ impl TaskContextInner {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone())),
         );
+        merged.extend(self.task_vars.iter().map(|(k, v)| (k.clone(), v.clone())));
         merged
     }
 
