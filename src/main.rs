@@ -123,7 +123,9 @@ async fn main() -> eyre::Result<()> {
                 }
             };
 
-            process_play(play_basedir, play.clone(), command_target).await?;
+            let result = process_play(play_basedir, play.clone(), command_target.clone()).await;
+            command_target.reset().await?;
+            result?;
         }
     }
 

@@ -7,6 +7,10 @@ use std::{
 use eyre::{eyre, Context};
 use tracing::{debug, Level};
 
+/// SSH ControlPath template — tokens expanded by ssh itself:
+/// %r = remote user, %h = host, %p = port
+const SSH_CONTROL_PATH: &str = "/tmp/kerosene-ssh-%r@%h:%p";
+
 pub struct PreparedCommand<'a> {
     pub target: &'a CommandTarget,
     pub command: OsString,
@@ -129,7 +133,12 @@ impl<'a> PreparedCommand<'a> {
                     &self.args,
                 )?;
 
-                let mut args: Vec<OsString> = vec!["-oClearAllForwardings=yes".into()];
+                let mut args: Vec<OsString> = vec![
+                    "-oClearAllForwardings=yes".into(),
+                    "-oControlMaster=auto".into(),
+                    format!("-oControlPath={SSH_CONTROL_PATH}").into(),
+                    "-oControlPersist=60s".into(),
+                ];
 
                 if let Some(port) = port {
                     args.push(format!("-oPort={port}").into());
@@ -208,6 +217,7 @@ impl CommandTarget {
             } if !*dry => {
                 let local = CommandTarget::default();
                 let mut cmd = PreparedCommand::new(&local, "ssh");
+                cmd.arg(format!("-oControlPath={SSH_CONTROL_PATH}"));
                 cmd.arg("-Oexit");
                 if let Some(port) = port {
                     cmd.arg(format!("-oPort={port}"));
@@ -229,7 +239,7 @@ impl CommandTarget {
                     .wrap_err("failed to wait for ssh to exit")?;
 
                 return match status.code() {
-                    Some(exit_code) if exit_code != 0 || exit_code != 255 => {
+                    Some(exit_code) if exit_code != 0 && exit_code != 255 => {
                         Err(eyre!("unexpected ssh exit code: {exit_code}"))
                     }
                     Some(_) | None => Ok(()),
