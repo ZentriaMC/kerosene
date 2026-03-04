@@ -13,8 +13,10 @@ Ansible requires Python on every target machine. This makes it incompatible with
 - **Jinja2 templating** -- variable interpolation in tasks and template files via MiniJinja
 - **SSH ControlMaster** -- automatic connection multiplexing (`ControlPersist=60s`)
 - **Privilege escalation** -- `become` / `become_user` via sudo
-- **Handlers** -- `notify` / `listen` with automatic flush at end of play
+- **Handlers** -- `notify` / `listen` with automatic flush at end of play (only triggered on changed tasks)
 - **Roles** -- standard `roles/<name>/{tasks,handlers,defaults,files,templates}/` layout
+- **Task status tracking** -- changed/ok/failed per task with play recap summary
+- **`ignore_errors`** -- continue play execution on task failure when set
 - **Safe shell quoting** -- all remote commands are shell-quoted via `shlex`
 
 ## Usage
@@ -97,11 +99,12 @@ Hosts can be targeted by group name or `all`. Connection variables follow Ansibl
 
 ## Variable precedence
 
-Variables are resolved in three layers, lowest to highest precedence:
+Variables are resolved in four layers, lowest to highest precedence:
 
 1. **Role defaults** -- `roles/<name>/defaults/main.yml`, scoped per role
 2. **Facts** -- set via `set_fact`, persists across the entire play
 3. **Role play vars** -- `vars:` on the role entry in the play, scoped per role
+4. **Task vars** -- `vars:` on individual tasks/handlers, scoped per task
 
 Higher layers override lower layers. All variables are available in Jinja2 expressions for task arguments and template rendering.
 
@@ -154,11 +157,8 @@ GitHub Actions runs `cargo fmt --check` and `cargo clippy` on pushes and PRs to 
 ## Current limitations
 
 - `when` conditionals are parsed but not evaluated
-- `register` captures output but templating support is basic
-- `vars` on tasks are parsed but not injected
 - `delegate_to` only supports `localhost`
 - `import_tasks` is a stub (no-op)
 - Remote template sources (`remote_src: true`) are not implemented
 - Inventory patterns only support `all` or a single group name (no glob/regex)
 - No `--check` (dry run) mode exposed via CLI
-- No `changed` / `ok` / `failed` status tracking per task
