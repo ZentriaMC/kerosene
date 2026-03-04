@@ -5,7 +5,7 @@ use structstruck::strike;
 
 use crate::task::KeroseneTaskInfo;
 
-use super::{Task, TaskContext, TaskResult};
+use super::{Task, TaskContext, TaskOutput, TaskResult};
 
 strike! {
     #[strikethrough[derive(Debug, Deserialize)]]
@@ -20,7 +20,7 @@ impl Task for ImportTasks {
         let _ = context;
         let _ = value;
 
-        Ok(None)
+        Ok(TaskOutput::ok(None))
     }
 }
 

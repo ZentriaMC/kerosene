@@ -1,14 +1,15 @@
 use std::{collections::VecDeque, path::PathBuf};
 
 use async_trait::async_trait;
-use eyre::{eyre, Context};
+use eyre::{Context, eyre};
 use serde::Deserialize;
 use tracing::trace;
 
 use crate::task::KeroseneTaskInfo;
 
 use super::{
-    RunCommandOpts, StdinSource, StructuredTask, TaskContext, TaskContextInner, TaskResult,
+    RunCommandOpts, StdinSource, StructuredTask, TaskContext, TaskContextInner, TaskOutput,
+    TaskResult,
 };
 
 #[derive(Debug, Deserialize)]
@@ -66,7 +67,7 @@ impl StructuredTask for CopyTask {
             ..Default::default()
         })?;
 
-        Ok(None)
+        Ok(TaskOutput::changed(None))
     }
 }
 

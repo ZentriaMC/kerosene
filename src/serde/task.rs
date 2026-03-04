@@ -15,6 +15,7 @@ pub struct TaskDescription {
     pub r#become: bool,
     pub become_user: Option<String>,
     pub delegate_to: Option<String>,
+    pub ignore_errors: bool,
 
     pub when: Vec<String>,
     pub notify: Vec<String>,
@@ -133,6 +134,7 @@ impl<'de> serde::de::Visitor<'de> for TaskVisitor {
         let mut notify = None::<Vec<String>>;
         let mut register = None::<String>;
         let mut vars = None::<HashMap<String, Value>>;
+        let mut ignore_errors = None::<bool>;
         let mut listen = None::<String>;
 
         while let Some((key, value)) = map.next_entry::<String, Value>()? {
@@ -184,6 +186,16 @@ impl<'de> serde::de::Visitor<'de> for TaskVisitor {
                         return Err(serde::de::Error::custom("duplicate become_user"));
                     }
                 }
+                "ignore_errors" => {
+                    if ignore_errors.is_none() {
+                        ignore_errors =
+                            Some(value.as_bool().ok_or(serde::de::Error::custom(
+                                "ignore_errors is not a boolean",
+                            ))?);
+                    } else {
+                        return Err(serde::de::Error::custom("duplicate ignore_errors"));
+                    }
+                }
                 "when" => {
                     if when.is_none() {
                         if let Some(expr) = value.as_str() {
@@ -193,7 +205,7 @@ impl<'de> serde::de::Visitor<'de> for TaskVisitor {
                                 Err(_) => {
                                     return Err(serde::de::Error::custom(
                                         "expected when to be a list of strings",
-                                    ))
+                                    ));
                                 }
                                 Ok(v) => v,
                             };
@@ -226,7 +238,7 @@ impl<'de> serde::de::Visitor<'de> for TaskVisitor {
                             Err(_) => {
                                 return Err(serde::de::Error::custom(
                                     "expected notify to be a list of strings",
-                                ))
+                                ));
                             }
                             Ok(v) => v,
                         };
@@ -300,6 +312,7 @@ impl<'de> serde::de::Visitor<'de> for TaskVisitor {
                 r#become: r#become.unwrap_or_default(),
                 become_user,
                 delegate_to,
+                ignore_errors: ignore_errors.unwrap_or_default(),
                 when: when.unwrap_or_default(),
                 notify: notify.unwrap_or_default(),
                 register,

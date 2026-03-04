@@ -5,7 +5,9 @@ use structstruck::strike;
 
 use crate::task::KeroseneTaskInfo;
 
-use super::{RunCommandOpts, StructuredTask, TaskContext, TaskContextInner, TaskResult};
+use super::{
+    RunCommandOpts, StructuredTask, TaskContext, TaskContextInner, TaskOutput, TaskResult,
+};
 
 strike! {
     #[strikethrough[derive(Debug, Deserialize)]]
@@ -46,12 +48,9 @@ impl StructuredTask for ShellTask {
             Value::String("stderr".into()),
             Value::String(output.stderr.trim_end_matches('\n').into()),
         );
-        result.insert(
-            Value::String("rc".into()),
-            Value::Number(output.rc.into()),
-        );
+        result.insert(Value::String("rc".into()), Value::Number(output.rc.into()));
 
-        Ok(Some(Value::Mapping(result)))
+        Ok(TaskOutput::changed(Some(Value::Mapping(result))))
     }
 }
 

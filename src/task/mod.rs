@@ -217,7 +217,9 @@ impl TaskContextInner {
             drop(child_stdin);
         }
 
-        let output = child.wait_with_output().wrap_err("failed to wait for child")?;
+        let output = child
+            .wait_with_output()
+            .wrap_err("failed to wait for child")?;
         let rc = output
             .status
             .code()
@@ -256,7 +258,28 @@ impl TaskContext {
     }
 }
 
-pub type TaskResult = eyre::Result<Option<Value>>;
+pub struct TaskOutput {
+    pub changed: bool,
+    pub output: Option<Value>,
+}
+
+impl TaskOutput {
+    pub fn changed(output: Option<Value>) -> Self {
+        Self {
+            changed: true,
+            output,
+        }
+    }
+
+    pub fn ok(output: Option<Value>) -> Self {
+        Self {
+            changed: false,
+            output,
+        }
+    }
+}
+
+pub type TaskResult = eyre::Result<TaskOutput>;
 pub type TaskFut = Pin<Box<dyn Future<Output = TaskResult> + Send + 'static>>;
 pub type TaskRun = dyn Fn(TaskContext, Value) -> TaskFut + Send + Sync + 'static;
 

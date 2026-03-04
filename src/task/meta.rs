@@ -6,7 +6,7 @@ use tracing::{debug, warn};
 
 use crate::task::KeroseneTaskInfo;
 
-use super::{StructuredTask, TaskContext, TaskResult};
+use super::{StructuredTask, TaskContext, TaskOutput, TaskResult};
 
 strike! {
     #[strikethrough[derive(Debug, Deserialize)]]
@@ -47,7 +47,7 @@ impl StructuredTask for MetaTask {
             }
         }
 
-        Ok(None)
+        Ok(TaskOutput::ok(None))
     }
 }
 

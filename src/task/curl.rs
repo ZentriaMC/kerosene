@@ -6,7 +6,7 @@ use structstruck::strike;
 
 use crate::task::KeroseneTaskInfo;
 
-use super::{StructuredTask, TaskContext, TaskResult};
+use super::{StructuredTask, TaskContext, TaskOutput, TaskResult};
 
 strike! {
     #[strikethrough[derive(Debug, Deserialize)]]
@@ -34,7 +34,7 @@ impl StructuredTask for Curl {
         let ctx = context.lock().await;
         ctx.run_command(None, command.iter().map(String::as_str).collect())?;
 
-        Ok(None)
+        Ok(TaskOutput::changed(None))
     }
 }
 

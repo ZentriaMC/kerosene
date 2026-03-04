@@ -1,12 +1,12 @@
 use async_trait::async_trait;
-use eyre::{eyre, Context};
+use eyre::{Context, eyre};
 use serde::Deserialize;
 
 use crate::{render, task::KeroseneTaskInfo};
 
 use super::{
+    RunCommandOpts, StdinSource, StructuredTask, TaskContext, TaskOutput, TaskResult,
     copy::{build_install_command, resolve_local_file},
-    RunCommandOpts, StdinSource, StructuredTask, TaskContext, TaskResult,
 };
 
 #[derive(Debug, Deserialize)]
@@ -76,7 +76,7 @@ impl StructuredTask for TemplateTask {
             ..Default::default()
         })?;
 
-        Ok(None)
+        Ok(TaskOutput::changed(None))
     }
 }
 

@@ -155,9 +155,23 @@
       shell:
         cmd: "rm -f /tmp/kerosene-binary-src.bin"
 
+    # --- Test 11: ignore_errors ---
+    - name: "Test ignore_errors: failing command should not abort play"
+      ignore_errors: true
+      shell:
+        cmd: "exit 1"
+
+    - name: "Test ignore_errors: this task proves the play continued"
+      shell:
+        cmd: "echo 'ignore-errors-ok' > /tmp/kerosene-ignore-errors.txt"
+
+    - name: "Test ignore_errors: verify"
+      shell:
+        cmd: "test \"$(cat /tmp/kerosene-ignore-errors.txt)\" = 'ignore-errors-ok'"
+
     # --- Cleanup ---
     - name: "Cleanup test artifacts"
       become: true
       shell:
-        cmd: "rm -f /tmp/kerosene-*.txt /tmp/kerosene-*.bin /etc/kerosene-*.txt"
+        cmd: "rm -f /tmp/kerosene-*.txt /tmp/kerosene-*.bin /tmp/kerosene-*.log /etc/kerosene-*.txt"
 

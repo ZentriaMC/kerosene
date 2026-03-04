@@ -10,7 +10,7 @@ use eyre::eyre;
 use kerosene::load_yaml;
 use serde::task::HandlerDescription;
 use serde_yaml::Value;
-use tracing::{debug, info, level_filters::LevelFilter, trace};
+use tracing::{debug, info, level_filters::LevelFilter, trace, warn};
 use tracing_subscriber::EnvFilter;
 
 pub mod command;
@@ -19,12 +19,27 @@ pub mod render;
 pub mod serde;
 pub mod task;
 
-use crate::inventory::{is_localhost, Inventory};
+use crate::inventory::{Inventory, is_localhost};
 use crate::serde::{
     play::{Play, PlayRole},
     task::TaskDescription,
 };
 use crate::task::{KeroseneTaskInfo, TaskContext, TaskId};
+
+#[derive(Debug, Default)]
+struct PlayStats {
+    ok: usize,
+    changed: usize,
+    failed: usize,
+}
+
+impl std::ops::AddAssign for PlayStats {
+    fn add_assign(&mut self, rhs: Self) {
+        self.ok += rhs.ok;
+        self.changed += rhs.changed;
+        self.failed += rhs.failed;
+    }
+}
 
 pub fn known_tasks() -> &'static HashMap<&'static str, TaskId> {
     static TASKS: OnceLock<HashMap<&'static str, TaskId>> = OnceLock::new();
@@ -100,6 +115,8 @@ async fn main() -> eyre::Result<()> {
     let inv: Inventory = load_yaml(&args.inventory)?
         .ok_or_else(|| eyre!("inventory at '{:?}' could not be opened", &args.inventory))?;
 
+    let mut host_stats: HashMap<String, PlayStats> = HashMap::new();
+
     for play in plays {
         let hosts = inv.resolve_hosts(&play.hosts)?;
 
@@ -125,8 +142,20 @@ async fn main() -> eyre::Result<()> {
 
             let result = process_play(play_basedir, play.clone(), command_target.clone()).await;
             command_target.reset().await?;
-            result?;
+            let stats = result?;
+            *host_stats.entry(host.name.clone()).or_default() += stats;
         }
+    }
+
+    // Play recap
+    for (host, stats) in &host_stats {
+        info!(
+            host,
+            ok = stats.ok + stats.changed,
+            changed = stats.changed,
+            failed = stats.failed,
+            "play recap",
+        );
     }
 
     Ok(())
@@ -136,13 +165,14 @@ async fn process_play(
     basedir: &Path,
     play: Play,
     command_target: CommandTarget,
-) -> eyre::Result<()> {
+) -> eyre::Result<PlayStats> {
     let ctx: TaskContext = TaskContext::new(basedir.to_path_buf());
     ctx.lock().await.command_target = command_target;
+    let mut stats = PlayStats::default();
 
     // Process pre_tasks
     if let Some(pre_tasks) = play.pre_tasks {
-        process_tasks(ctx.clone(), pre_tasks, None, true).await?;
+        stats += process_tasks(ctx.clone(), pre_tasks, None, true).await?;
     }
 
     // Process roles
@@ -164,13 +194,13 @@ async fn process_play(
                 ctx_inner.role_play_vars.clear();
             }
 
-            result?;
+            stats += result?;
         }
     }
 
     // Process tasks
     if let Some(tasks) = play.tasks {
-        process_tasks(ctx.clone(), tasks, None, false).await?;
+        stats += process_tasks(ctx.clone(), tasks, None, false).await?;
     }
 
     // Process role & tasks handlers
@@ -178,10 +208,10 @@ async fn process_play(
 
     // Process post_tasks
     if let Some(post_tasks) = play.post_tasks {
-        process_tasks(ctx.clone(), post_tasks, None, true).await?;
+        stats += process_tasks(ctx.clone(), post_tasks, None, true).await?;
     }
 
-    Ok(())
+    Ok(stats)
 }
 
 async fn register_handlers(
@@ -223,7 +253,11 @@ async fn register_handlers(
     Ok(())
 }
 
-async fn process_role(ctx: TaskContext, role_basedir: &Path, role: PlayRole) -> eyre::Result<()> {
+async fn process_role(
+    ctx: TaskContext,
+    role_basedir: &Path,
+    role: PlayRole,
+) -> eyre::Result<PlayStats> {
     // TODO: handle role path
 
     // Load role defaults into scoped role_defaults (not persistent facts)
@@ -255,10 +289,10 @@ async fn process_role(ctx: TaskContext, role_basedir: &Path, role: PlayRole) -> 
     let tasks: Option<Vec<TaskDescription>> = load_yaml(&role_basedir.join("tasks/main.yml"))?;
 
     if let Some(tasks) = tasks {
-        process_tasks(ctx, tasks, Some(role.name().to_string()), false).await?;
+        return process_tasks(ctx, tasks, Some(role.name().to_string()), false).await;
     }
 
-    Ok(())
+    Ok(PlayStats::default())
 }
 
 async fn process_tasks(
@@ -266,7 +300,9 @@ async fn process_tasks(
     tasks: Vec<TaskDescription>,
     role: Option<String>,
     flush_handlers: bool,
-) -> eyre::Result<()> {
+) -> eyre::Result<PlayStats> {
+    let mut stats = PlayStats::default();
+
     for task in tasks {
         let task_id = task.task_id.name();
         let name = match (&role, &task.name) {
@@ -282,6 +318,7 @@ async fn process_tasks(
             info!(name, task_id, "running task");
         }
         let task_info = get_task(task_id).unwrap();
+        let ignore_errors = task.ignore_errors;
         ctx.lock().await.do_become_user = if task.r#become {
             Some(task.become_user.unwrap_or("root".to_string()))
         } else {
@@ -312,15 +349,46 @@ async fn process_tasks(
         let resolved_vars = render::resolve_vars(&ctx.lock().await.merged_vars())?;
         let rendered_args = render::render_value(&task.args, &resolved_vars)?;
 
-        let result = (task_info.run)(ctx.clone(), rendered_args).await?;
-        if let (Some(register), Some(value)) = (&task.register, result) {
-            debug!(register, "registering output");
-            ctx.lock().await.facts.insert(register.clone(), value);
-        }
-        for notify in task.notify {
-            let rendered_notify = render::render_str(&notify, &resolved_vars)?;
-            let mut ctx = ctx.lock().await;
-            ctx.pending_handlers.push_back(rendered_notify);
+        match (task_info.run)(ctx.clone(), rendered_args).await {
+            Ok(result) => {
+                if result.changed {
+                    stats.changed += 1;
+                    info!(name, "changed");
+                } else {
+                    stats.ok += 1;
+                    info!(name, "ok");
+                }
+
+                if let (Some(register), Some(mut value)) = (&task.register, result.output) {
+                    // Inject `changed` key into registered output mapping
+                    if let Value::Mapping(ref mut map) = value {
+                        map.insert(Value::String("changed".into()), Value::Bool(result.changed));
+                    }
+                    debug!(register, "registering output");
+                    ctx.lock().await.facts.insert(register.clone(), value);
+                }
+
+                if result.changed {
+                    for notify in task.notify {
+                        let rendered_notify = render::render_str(&notify, &resolved_vars)?;
+                        let mut ctx = ctx.lock().await;
+                        ctx.pending_handlers.push_back(rendered_notify);
+                    }
+                }
+            }
+            Err(err) => {
+                stats.failed += 1;
+                if ignore_errors {
+                    warn!(name, ?err, "failed (ignored)");
+                } else {
+                    // Clean up before returning
+                    ctx.lock().await.task_vars.clear();
+                    if let Some(command_target) = prev_command_target {
+                        ctx.lock().await.command_target = command_target;
+                    }
+                    return Err(err);
+                }
+            }
         }
 
         ctx.lock().await.task_vars.clear();
@@ -335,7 +403,7 @@ async fn process_tasks(
         run_handlers(ctx).await?;
     }
 
-    Ok(())
+    Ok(stats)
 }
 
 pub async fn run_handlers(context: TaskContext) -> eyre::Result<()> {
