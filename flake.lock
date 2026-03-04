@@ -25,11 +25,11 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1772582977,
-        "narHash": "sha256-i/fUbHIVQqIQgKOUksavWvKCpcanSqpF+HJdmCGd5mc=",
+        "lastModified": 1772584310,
+        "narHash": "sha256-SSUVEcyNkUAJHNBfgVV9HKPe2+poCHQ9ueg8z9wdDqs=",
         "owner": "ZentriaMC",
         "repo": "fcos-harness",
-        "rev": "9800f9a2aefb8dc30974a34b97e104015d26befa",
+        "rev": "2b28dca37decf3fca0095e7cf94777a8c7f98f27",
         "type": "github"
       },
       "original": {
