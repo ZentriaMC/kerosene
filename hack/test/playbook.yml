@@ -122,9 +122,42 @@
       shell:
         cmd: "echo '$HOME is set' > /tmp/kerosene-escape-test2.txt && grep -q '\\$HOME is set' /tmp/kerosene-escape-test2.txt"
 
+    # --- Test 10: Binary file copy integrity ---
+    - name: "Test binary copy: generate random file on controller"
+      delegate_to: localhost
+      shell:
+        cmd: "dd if=/dev/urandom of=/tmp/kerosene-binary-src.bin bs=4096 count=1 2>/dev/null"
+
+    - name: "Test binary copy: hash on controller"
+      delegate_to: localhost
+      shell:
+        cmd: "if command -v sha256sum >/dev/null 2>&1; then sha256sum /tmp/kerosene-binary-src.bin; else shasum -a 256 /tmp/kerosene-binary-src.bin; fi | cut -d' ' -f1"
+      register: "controller_hash"
+
+    - name: "Test binary copy: upload to remote"
+      become: true
+      copy:
+        src: "/tmp/kerosene-binary-src.bin"
+        dest: "/tmp/kerosene-binary-copy.bin"
+        mode: "0644"
+
+    - name: "Test binary copy: hash on remote"
+      shell:
+        cmd: "sha256sum /tmp/kerosene-binary-copy.bin | cut -d' ' -f1"
+      register: "remote_hash"
+
+    - name: "Test binary copy: verify integrity"
+      shell:
+        cmd: "test '{{ controller_hash.stdout }}' = '{{ remote_hash.stdout }}'"
+
+    - name: "Test binary copy: cleanup controller"
+      delegate_to: localhost
+      shell:
+        cmd: "rm -f /tmp/kerosene-binary-src.bin"
+
     # --- Cleanup ---
     - name: "Cleanup test artifacts"
       become: true
       shell:
-        cmd: "rm -f /tmp/kerosene-*.txt /etc/kerosene-*.txt"
+        cmd: "rm -f /tmp/kerosene-*.txt /tmp/kerosene-*.bin /etc/kerosene-*.txt"
 
