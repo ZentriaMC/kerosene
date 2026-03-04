@@ -4,8 +4,8 @@ use std::{
     process::{Command, ExitStatus},
 };
 
-use eyre::{eyre, Context};
-use tracing::{debug, Level};
+use eyre::{Context, eyre};
+use tracing::{Level, debug};
 
 /// SSH ControlPath template — tokens expanded by ssh itself:
 /// %r = remote user, %h = host, %p = port
@@ -174,7 +174,6 @@ impl<'a> PreparedCommand<'a> {
         Ok(cmd)
     }
 }
-
 
 #[derive(Clone, Debug)]
 pub enum CommandTarget {

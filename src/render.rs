@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use eyre::{eyre, Context};
+use eyre::{Context, eyre};
 use serde_yaml::Value;
 use tracing::trace;
 
