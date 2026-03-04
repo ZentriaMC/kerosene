@@ -33,10 +33,6 @@
           ];
 
           BUTANE = "${pkgs.butane}/bin/butane";
-          QEMU_EFI_FW =
-            if pkgs.stdenv.isx86_64 then "${pkgs.qemu}/share/qemu/edk2-x86_64-code.fd"
-            else if pkgs.stdenv.isAarch64 then "${pkgs.qemu}/share/qemu/edk2-aarch64-code.fd"
-            else "UNSUPPORTED";
         };
       });
 }

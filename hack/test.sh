@@ -3,7 +3,6 @@
 # Uses QEMU savevm/loadvm to cache a booted VM snapshot for fast restarts.
 #
 # Env vars:
-#   QEMU_EFI_FW       (required) Path to UEFI firmware
 #   TEST_SSH_PORT      SSH port forward (default: 2223)
 #   REBUILD_SNAPSHOT   Set to 1 to force snapshot recreation
 #   KEEP_VM            Set to 1 to keep VM running after tests
@@ -21,8 +20,6 @@ monitor_sock="${work_dir}/qemu-monitor.sock"
 pid_file="${work_dir}/qemu.pid"
 
 chmod 600 "${ssh_key}"
-
-: "${QEMU_EFI_FW:?QEMU_EFI_FW must be set}"
 
 fh() {
     fcos-harness --work-dir "${work_dir}" "$@"
