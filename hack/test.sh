@@ -39,10 +39,15 @@ fh up \
 
 trap 'fh down' EXIT
 
+# -- Generate inventory with correct SSH port --
+inventory="${FCOS_HARNESS_WORK_DIR}/inventory.yml"
+sed "s/ansible_port: .*/ansible_port: ${FCOS_HARNESS_SSH_PORT}/" \
+    "${root}/hack/test/inventory.kerosene.yml" > "${inventory}"
+
 # -- Run kerosene E2E test from host --
 echo ">>> Running kerosene E2E test playbook..."
 cd "${root}"
-"${kerosene_bin}" -i hack/test/inventory.kerosene.yml hack/test/playbook.yml
+"${kerosene_bin}" -i "${inventory}" hack/test/playbook.yml
 
 echo ">>> All E2E tests passed!"
 
