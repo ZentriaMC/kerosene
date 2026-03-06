@@ -25,10 +25,10 @@ Ansible requires Python on every target machine. This makes it incompatible with
 kerosene -i inventory.yml playbook.yml
 ```
 
-Logging is controlled via `RUST_LOG` (defaults to TRACE):
+Logging is controlled via `RUST_LOG` (defaults to INFO):
 
 ```
-RUST_LOG=info kerosene -i inventory.yml playbook.yml
+RUST_LOG=trace kerosene -i inventory.yml playbook.yml
 ```
 
 ## Playbook format

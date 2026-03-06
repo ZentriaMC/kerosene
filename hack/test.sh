@@ -47,7 +47,7 @@ sed "s/ansible_port: .*/ansible_port: ${FCOS_HARNESS_SSH_PORT}/" \
 # -- Run kerosene E2E test from host --
 echo ">>> Running kerosene E2E test playbook..."
 cd "${root}"
-"${kerosene_bin}" -i "${inventory}" hack/test/playbook.yml
+RUST_LOG=trace "${kerosene_bin}" -i "${inventory}" hack/test/playbook.yml
 
 echo ">>> All E2E tests passed!"
 
