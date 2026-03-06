@@ -13,14 +13,14 @@ use std::{
 };
 
 use async_trait::async_trait;
-use eyre::Context;
+use eyre::{Context, eyre};
 use serde::de::DeserializeOwned;
 use serde_yaml::Value;
 use tokio::sync::Mutex;
 use tracing::trace;
 
 use crate::{
-    command::{CommandExt, CommandTarget, PreparedCommand},
+    command::{CommandTarget, PreparedCommand},
     serde::task::HandlerDescription,
 };
 
@@ -228,7 +228,19 @@ impl TaskContextInner {
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
 
-        output.status.ensure_success()?;
+        if !output.status.success() {
+            let mut err = eyre!("unsuccessful run: exit status {rc}");
+
+            if rc == 255 && matches!(command_target, CommandTarget::Remote { .. }) {
+                err = err.wrap_err("SSH connection failed (exit code 255)");
+            }
+
+            if capture && !stderr.is_empty() {
+                err = err.wrap_err(stderr.trim_end().to_owned());
+            }
+
+            return Err(err);
+        }
 
         Ok(CommandOutput { stdout, stderr, rc })
     }

@@ -1,7 +1,6 @@
 use std::{
     ffi::{OsStr, OsString},
-    os::unix::process::ExitStatusExt,
-    process::{Command, ExitStatus},
+    process::Command,
 };
 
 use eyre::{Context, eyre};
@@ -251,21 +250,3 @@ impl CommandTarget {
     }
 }
 
-pub trait CommandExt: Sized {
-    fn ensure_success(self) -> eyre::Result<Self>;
-}
-
-impl CommandExt for ExitStatus {
-    fn ensure_success(self) -> eyre::Result<Self> {
-        if !self.success() {
-            let exit_code = self
-                .code()
-                // Add 128 like shells do
-                .unwrap_or_else(|| 128 + self.signal().unwrap_or(0));
-
-            Err(eyre!("unsuccessful run: exit status {}", exit_code))
-        } else {
-            Ok(self)
-        }
-    }
-}
